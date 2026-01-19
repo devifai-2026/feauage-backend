@@ -1,0 +1,3 @@
+
+- Admin user: admin@jewellery.com / admin@123
+- Sample customer: customer@example.com / Customer@123

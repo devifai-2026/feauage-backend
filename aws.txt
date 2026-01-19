@@ -1,0 +1,15 @@
+Retrieve password
+You can view and download the user's password below or email users instructions for signing in to the AWS Management Console. This is the only time you can view and download this password.
+
+Console sign-in details
+Email sign-in instructions
+Console sign-in URL
+
+https://212537427527.signin.aws.amazon.com/console
+User name
+
+feauge-ecomm-user
+Console password
+
+Manifestedfeauag@123
+Hide
