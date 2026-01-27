@@ -1,13 +1,15 @@
 const User = require('../../models/User');
 const Order = require('../../models/Order');
-const Target = require('../../models/Target'); 
-const Product = require('../../models/Product'); 
+const Target = require('../../models/Target');
+const Product = require('../../models/Product');
 const AdminActivity = require('../../models/AdminActivity');
 const catchAsync = require('../../utils/catchAsync');
 const AppError = require('../../utils/appError');
 const APIFeatures = require('../../utils/apiFeatures');
 const Analytics = require('../../models/Analytics'); // Your analytics model
+const GuestUser = require('../../models/GuestUser');
 const UserActivityLog = require('../../models/UserActivityLog');
+const { toIST } = require('../../utils/dateHelpers');
 
 // @desc    Get admin dashboard stats
 // @route   GET /api/v1/admin/dashboard/stats
@@ -15,12 +17,6 @@ const UserActivityLog = require('../../models/UserActivityLog');
 
 exports.getDashboardStats = catchAsync(async (req, res, next) => {
   try {
-    // Convert to IST timezone (UTC+5:30)
-    const getISTDate = () => {
-      const now = new Date();
-      return new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-    };
-
     // Import models
     const Order = require('../../models/Order');
     const Product = require('../../models/Product');
@@ -29,7 +25,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
     const Analytics = require('../../models/Analytics');
 
     // Get date ranges in IST
-    const nowIST = getISTDate();
+    const nowIST = toIST();
     const today = new Date(nowIST);
     today.setHours(0, 0, 0, 0);
 
@@ -74,7 +70,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
       // Analytics data for performance metrics
       analyticsData
     ] = await Promise.all([
-      User.countDocuments({ 
+      User.countDocuments({
         isActive: true,
         role: { $ne: 'admin' }
       }),
@@ -196,7 +192,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
       completedTargets: 0,
       activeTargets: 0
     };
-    
+
     try {
       const targetStatsResult = await Target.getTargetStats(currentUserId);
       if (targetStatsResult.length > 0) {
@@ -227,7 +223,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
         {
           $match: {
             status: 'delivered',
-            createdAt: { 
+            createdAt: {
               $gte: currentYearStart,
               $lt: currentYearEnd
             }
@@ -252,28 +248,28 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
 
     // 5. Format monthly revenue for chart
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    
+
     let monthlyRevenueChartData = [];
-    
+
     for (let month = 1; month <= 12; month++) {
-      const monthData = monthlyRevenue.find(item => 
+      const monthData = monthlyRevenue.find(item =>
         item._id.year === currentYear && item._id.month === month
       );
-      
+
       let revenue = 0;
       let targetForMonth = 0;
-      
+
       if (monthData) {
         revenue = monthData.revenue;
         targetForMonth = Math.round(revenue * 1.15);
       }
-      
+
       const currentMonth = nowIST.getMonth() + 1;
-      
+
       if (month === currentMonth && currentMonthTarget) {
         targetForMonth = currentMonthTarget.targetValue;
       }
-      
+
       monthlyRevenueChartData.push({
         month: monthNames[month - 1],
         revenue: revenue,
@@ -287,7 +283,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
     const currentMonth = nowIST.getMonth();
     let currentEarnings = 0;
     let prevMonthEarnings = 0;
-    
+
     try {
       const currentMonthRevenueResult = await Order.aggregate([
         {
@@ -336,15 +332,15 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
     let targetProgress = 0;
     let targetStatus = 'no-target';
     let hasValidTarget = false;
-    
+
     if (currentMonthTarget) {
       const targetStart = new Date(currentMonthTarget.startDate);
       const targetEnd = new Date(currentMonthTarget.endDate);
-      
+
       if (nowIST >= targetStart && nowIST <= targetEnd && currentMonthTarget.isActive) {
         hasValidTarget = true;
         monthlyTarget = currentMonthTarget.targetValue;
-        
+
         if (currentMonthTarget.progress >= 100) {
           targetStatus = 'completed';
         } else if (currentMonthTarget.progress > 0) {
@@ -352,20 +348,20 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
         } else {
           targetStatus = 'not-started';
         }
-        
+
         if (currentMonthTarget.currentValue !== currentEarnings) {
           try {
-            const newProgress = monthlyTarget > 0 
+            const newProgress = monthlyTarget > 0
               ? (currentEarnings / monthlyTarget * 100)
               : 0;
-            
+
             let newStatus = currentMonthTarget.status;
             if (newProgress >= 100 && currentMonthTarget.status !== 'completed') {
               newStatus = 'completed';
             } else if (newProgress > 0 && currentMonthTarget.status === 'not-started') {
               newStatus = 'in-progress';
             }
-            
+
             await Target.findByIdAndUpdate(currentMonthTarget._id, {
               currentValue: currentEarnings,
               progress: newProgress,
@@ -377,7 +373,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
             console.error('Error updating target:', error);
           }
         }
-        
+
         targetProgress = monthlyTarget > 0
           ? (currentEarnings / monthlyTarget * 100)
           : 0;
@@ -400,14 +396,14 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
     let bouncedSessions = 0;
     let totalSessionDuration = 0;
     let totalPageViews = 0;
-    
+
     if (analyticsData && analyticsData.length > 0) {
       totalSessions = analyticsData.length;
       totalUniqueVisitors = analyticsData.length; // For now, sessionId = unique visitor
-      
+
       // Calculate bounce rate (sessions with only 1 page view)
       bouncedSessions = analyticsData.filter(session => session.pageViews === 1).length;
-      
+
       // Calculate average session duration
       const sessionsWithMultipleViews = analyticsData.filter(session => session.pageViews > 1);
       if (sessionsWithMultipleViews.length > 0) {
@@ -416,7 +412,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
           return sum + Math.min(duration, 1800); // Cap at 30 minutes to avoid outliers
         }, 0);
       }
-      
+
       // Calculate total page views
       totalPageViews = analyticsData.reduce((sum, session) => sum + session.pageViews, 0);
     }
@@ -424,50 +420,50 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
     // Calculate performance metrics
     const performanceMetrics = {
       // Conversion Rate: User to Order conversion (most relevant for ecommerce)
-      conversionRate: totalUsers > 0 
+      conversionRate: totalUsers > 0
         ? parseFloat((totalOrders / totalUsers * 100).toFixed(2))
         : 0,
-      
+
       // Avg Session Duration: Average time spent per session (in seconds)
-      avgSessionDuration: totalSessions > 0 
+      avgSessionDuration: totalSessions > 0
         ? parseFloat((totalSessionDuration / totalSessions).toFixed(0))
         : 0,
-      
+
       // Bounce Rate: % of single-page sessions
       bounceRate: totalSessions > 0
         ? parseFloat((bouncedSessions / totalSessions * 100).toFixed(1))
         : 0,
-      
+
       // New Sessions: New registered users (more relevant than just sessions for ecommerce)
       newSessions: newUsersLast30Days,
-      
+
       // Avg Order Value: Average revenue per order
       avgOrderValue: parseFloat(avgOrderValue.toFixed(2)),
-      
+
       // Target Completion Rate: % of completed targets
       targetCompletionRate: targetSummary.totalTargets > 0
         ? parseFloat((targetSummary.completedTargets / targetSummary.totalTargets * 100).toFixed(1))
         : 0,
-      
+
       // Order Fulfillment Rate: % of delivered orders
       orderFulfillmentRate: totalOrders > 0
         ? parseFloat((deliveredOrders / totalOrders * 100).toFixed(1))
         : 0,
-      
+
       // Avg Revenue Per User: Average revenue per registered user
       avgRevenuePerUser: totalUsers > 0
         ? parseFloat((totalRevenueValue / totalUsers).toFixed(2))
         : 0,
-      
+
       // Additional metrics for better insights
       avgPagesPerSession: totalSessions > 0
         ? parseFloat((totalPageViews / totalSessions).toFixed(1))
         : 0,
-      
+
       visitorToOrderRate: totalUniqueVisitors > 0
         ? parseFloat((totalOrders / totalUniqueVisitors * 100).toFixed(2))
         : 0,
-      
+
       // Business metrics
       repeatPurchaseRate: 0, // Would need order history per user
       cartAbandonmentRate: 0 // Would need cart tracking
@@ -489,19 +485,19 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
     const targetVsActualData = [];
     try {
       for (let i = 5; i >= 0; i--) {
-        const date = getISTDate();
+        const date = toIST();
         date.setMonth(date.getMonth() - i);
         const month = date.getMonth();
         const year = date.getFullYear();
         const monthName = monthNames[month];
-        
+
         const targetForMonth = allRevenueTargets.find(t => {
           const targetStart = new Date(t.startDate);
-          return targetStart.getMonth() === month && 
-                 targetStart.getFullYear() === year &&
-                 t.period === 'monthly';
+          return targetStart.getMonth() === month &&
+            targetStart.getFullYear() === year &&
+            t.period === 'monthly';
         });
-        
+
         const actualRevenueForMonth = await Order.aggregate([
           {
             $match: {
@@ -519,10 +515,10 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
             }
           }
         ]);
-        
+
         const actualRevenue = actualRevenueForMonth[0]?.revenue || 0;
         const targetValue = targetForMonth?.targetValue || actualRevenue * 1.15;
-        
+
         targetVsActualData.push({
           month: monthName,
           actual: actualRevenue,
@@ -547,8 +543,8 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
         {
           $group: {
             _id: {
-              $dateToString: { 
-                format: '%Y-%m-%d', 
+              $dateToString: {
+                format: '%Y-%m-%d',
                 date: '$createdAt',
                 timezone: '+05:30'
               }
@@ -567,7 +563,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
     const dailyUsersChartData = [];
     const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     for (let i = 6; i >= 0; i--) {
-      const date = getISTDate();
+      const date = toIST();
       date.setDate(date.getDate() - i);
       const dayIndex = date.getDay();
       const dayName = weekdays[dayIndex];
@@ -601,11 +597,11 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
         .sort('-createdAt')
         .limit(5)
         .select('firstName lastName email createdAt isActive');
-      
+
       recentUsers = recentUsers.map(user => {
         const userObj = user.toObject();
         if (userObj.createdAt) {
-          const istDate = new Date(userObj.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
+          const istDate = toIST(userObj.createdAt);
           userObj.createdAt = istDate;
         }
         return userObj;
@@ -687,7 +683,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
           completedTargets: targetSummary.completedTargets,
           totalTargetValue: targetSummary.totalTargetValue,
           totalAchievedValue: targetSummary.totalAchievedValue,
-          overallProgress: targetSummary.totalTargetValue > 0 
+          overallProgress: targetSummary.totalTargetValue > 0
             ? parseFloat((targetSummary.totalAchievedValue / targetSummary.totalTargetValue * 100).toFixed(1))
             : 0
         },
@@ -767,16 +763,16 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
           targetCompletionRate: performanceMetrics.targetCompletionRate,
           orderFulfillmentRate: performanceMetrics.orderFulfillmentRate,
           avgRevenuePerUser: performanceMetrics.avgRevenuePerUser,
-          
+
           // Analytics metrics
           avgPagesPerSession: performanceMetrics.avgPagesPerSession,
           visitorToOrderRate: performanceMetrics.visitorToOrderRate,
-          
+
           // Session analytics
           totalSessions: totalSessions,
           totalUniqueVisitors: totalUniqueVisitors,
           totalPageViews: totalPageViews,
-          
+
           // Formula explanations for transparency
           formulas: {
             conversionRate: '(Total Orders ÷ Total Users) × 100',
@@ -813,10 +809,10 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
         // Target insights
         targetInsights: {
           hasCurrentTarget: hasValidTarget,
-          recommendation: hasValidTarget 
+          recommendation: hasValidTarget
             ? `You're ${targetProgress >= 100 ? 'exceeding' : 'at'} ${parseFloat(targetProgress.toFixed(1))}% of your monthly target.`
             : 'Set a monthly revenue target to track your performance better.',
-          daysRemaining: hasValidTarget 
+          daysRemaining: hasValidTarget
             ? Math.max(0, Math.ceil((new Date(currentMonthTarget.endDate) - nowIST) / (1000 * 60 * 60 * 24)))
             : 30 - nowIST.getDate(),
           dailyTargetNeeded: monthlyTarget > 0
@@ -854,10 +850,10 @@ exports.getAdminActivities = catchAsync(async (req, res, next) => {
     .sort()
     .limitFields()
     .paginate();
-  
+
   const activities = await features.query.sort('-createdAt');
   const total = await AdminActivity.countDocuments(features.filterQuery);
-  
+
   res.status(200).json({
     status: 'success',
     results: activities.length,
@@ -880,16 +876,16 @@ exports.getSystemHealth = catchAsync(async (req, res, next) => {
     2: 'connecting',
     3: 'disconnecting'
   }[dbStatus] || 'unknown';
-  
+
   // Get memory usage
   const memoryUsage = process.memoryUsage();
-  
+
   // Get uptime
   const uptime = process.uptime();
-  
+
   // Get recent errors from logs (simplified)
   const errorLogs = [];
-  
+
   res.status(200).json({
     status: 'success',
     data: {
@@ -917,7 +913,7 @@ exports.getSystemHealth = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 exports.getUserStatistics = catchAsync(async (req, res, next) => {
   const { startDate, endDate } = req.query;
-  
+
   const matchStage = {};
   if (startDate && endDate) {
     matchStage.createdAt = {
@@ -925,7 +921,7 @@ exports.getUserStatistics = catchAsync(async (req, res, next) => {
       $lte: new Date(endDate)
     };
   }
-  
+
   const userStats = await User.aggregate([
     { $match: matchStage },
     {
@@ -947,11 +943,11 @@ exports.getUserStatistics = catchAsync(async (req, res, next) => {
       }
     }
   ]);
-  
+
   // Get daily user registrations for last 30 days
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  
+
   const dailyRegistrations = await User.aggregate([
     {
       $match: {
@@ -968,7 +964,7 @@ exports.getUserStatistics = catchAsync(async (req, res, next) => {
     },
     { $sort: { _id: 1 } }
   ]);
-  
+
   res.status(200).json({
     status: 'success',
     data: {
@@ -989,21 +985,21 @@ exports.getUserStatistics = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 exports.exportData = catchAsync(async (req, res, next) => {
   const { type, startDate, endDate } = req.body;
-  
+
   if (!type) {
     return next(new AppError('Export type is required', 400));
   }
-  
+
   let data;
   const matchStage = {};
-  
+
   if (startDate && endDate) {
     matchStage.createdAt = {
       $gte: new Date(startDate),
       $lte: new Date(endDate)
     };
   }
-  
+
   switch (type) {
     case 'orders':
       data = await Order.find(matchStage)
@@ -1011,21 +1007,21 @@ exports.exportData = catchAsync(async (req, res, next) => {
         .populate('items')
         .sort('-createdAt');
       break;
-      
+
     case 'users':
       data = await User.find(matchStage).select('-password');
       break;
-      
+
     case 'products':
       data = await Product.find(matchStage)
         .populate('category', 'name')
         .populate('subCategory', 'name');
       break;
-      
+
     default:
       return next(new AppError('Invalid export type', 400));
   }
-  
+
   // In a real implementation, you would create Excel/CSV files
   // For now, return JSON
   res.status(200).json({
@@ -1056,10 +1052,10 @@ exports.getAllUsers = catchAsync(async (req, res, next) => {
   } = req.query;
 
   console.log('Received role:', role);
-  
+
   // Build filter object
   const filter = {};
-  
+
   // Apply role filter if specified
   if (role && role !== 'All') {
     if (role === 'admin') {
@@ -1074,24 +1070,24 @@ exports.getAllUsers = catchAsync(async (req, res, next) => {
     // When role is undefined or 'All', show all users (including admins)
     // Don't add any role filter
   }
-  
+
   // Apply status filter if specified
   if (status && status !== 'All') {
     filter.isActive = status === 'Active';
   }
-  
+
   // Apply email verification filter if specified
   if (isEmailVerified === 'true' || isEmailVerified === 'false') {
     filter.isEmailVerified = isEmailVerified === 'true';
   }
-  
+
   // Apply date range filter if specified
   if (startDate || endDate) {
     filter.createdAt = {};
     if (startDate) filter.createdAt.$gte = new Date(startDate);
     if (endDate) filter.createdAt.$lte = new Date(endDate);
   }
-  
+
   // Apply search filter if specified
   if (search) {
     filter.$or = [
@@ -1101,41 +1097,41 @@ exports.getAllUsers = catchAsync(async (req, res, next) => {
       { phone: { $regex: search, $options: 'i' } }
     ];
   }
-  
+
   // Parse sort parameter
   let sortObj = {};
   if (sort) {
     const sortBy = sort.split(',');
     sortBy.forEach(sortItem => {
-      const [field, order] = sortItem.startsWith('-') 
-        ? [sortItem.substring(1), -1] 
+      const [field, order] = sortItem.startsWith('-')
+        ? [sortItem.substring(1), -1]
         : [sortItem, 1];
       sortObj[field] = order;
     });
   }
-  
+
   // Calculate pagination
   const pageNum = parseInt(page, 10);
   const limitNum = parseInt(limit, 10);
   const skip = (pageNum - 1) * limitNum;
-  
+
   console.log('Filter object:', JSON.stringify(filter, null, 2));
-  
+
   // Execute query with pagination
   const users = await User.find(filter)
     .select('-password -__v')
     .sort(sortObj)
     .skip(skip)
     .limit(limitNum);
-  
+
   // Get total count for pagination metadata
   const total = await User.countDocuments(filter);
-  
+
   // Calculate pagination metadata
   const totalPages = Math.ceil(total / limitNum);
   const hasNextPage = pageNum < totalPages;
   const hasPrevPage = pageNum > 1;
-  
+
   // Get user statistics for this filtered set
   const statsPipeline = [
     { $match: filter },
@@ -1191,9 +1187,9 @@ exports.getAllUsers = catchAsync(async (req, res, next) => {
       }
     }
   ];
-  
+
   const stats = await User.aggregate(statsPipeline);
-  
+
   res.status(200).json({
     status: 'success',
     data: {
@@ -1243,10 +1239,10 @@ exports.searchUsers = catchAsync(async (req, res, next) => {
     page = 1,
     limit = 50
   } = req.query;
-  
+
   // Build filter object
   const filter = {};
-  
+
   // Apply role filter
   if (role && role !== 'All') {
     if (role === 'admin') {
@@ -1258,17 +1254,17 @@ exports.searchUsers = catchAsync(async (req, res, next) => {
     // Exclude admins by default
     filter.role = { $nin: ['admin', 'superadmin'] };
   }
-  
+
   // Apply status filter
   if (status && status !== 'All') {
     filter.isActive = status === 'Active';
   }
-  
+
   // Apply email verification filter
   if (isEmailVerified === 'true' || isEmailVerified === 'false') {
     filter.isEmailVerified = isEmailVerified === 'true';
   }
-  
+
   // Apply search filter
   if (search) {
     filter.$or = [
@@ -1287,26 +1283,26 @@ exports.searchUsers = catchAsync(async (req, res, next) => {
       }
     ];
   }
-  
+
   // Parse sort parameters
   const sortObj = {};
   sortObj[sortBy] = sortOrder === 'desc' ? -1 : 1;
-  
+
   // Calculate pagination
   const pageNum = parseInt(page, 10);
   const limitNum = parseInt(limit, 10);
   const skip = (pageNum - 1) * limitNum;
-  
+
   // Execute query
   const users = await User.find(filter)
     .select('-password -__v')
     .sort(sortObj)
     .skip(skip)
     .limit(limitNum);
-  
+
   // Get total count
   const total = await User.countDocuments(filter);
-  
+
   res.status(200).json({
     status: 'success',
     data: {
@@ -1362,51 +1358,51 @@ exports.getUserById = catchAsync(async (req, res, next) => {
   /* =========================
      3. RECENT ORDERS
      ========================= */
-const recentOrders = await Order.find({ user: userId })
-  .sort('-createdAt')
-  .limit(10)
-  .select(
-    'orderId grandTotal subtotal discount shippingCharge tax status paymentStatus createdAt shippingAddress items' // Added correct field names
-  )
-  .populate({
-    path: 'items',
-    populate: {
-      path: 'product',
-      select: 'name images sellingPrice' // Make sure 'images' exists in Product schema
-    }
-  })
-  .lean(); // Add .lean() for better performance
-console.log({recentOrders})
+  const recentOrders = await Order.find({ user: userId })
+    .sort('-createdAt')
+    .limit(10)
+    .select(
+      'orderId grandTotal subtotal discount shippingCharge tax status paymentStatus createdAt shippingAddress items' // Added correct field names
+    )
+    .populate({
+      path: 'items',
+      populate: {
+        path: 'product',
+        select: 'name images sellingPrice' // Make sure 'images' exists in Product schema
+      }
+    })
+    .lean(); // Add .lean() for better performance
+  console.log({ recentOrders })
 
   /* =========================
      4. ORDER STATISTICS
      ========================= */
-const orderStatsAgg = await Order.aggregate([
-  { $match: { user: user._id } },
-  {
-    $group: {
-      _id: null,
-      totalOrders: { $sum: 1 },
-      totalSpent: { $sum: '$grandTotal' }, // Changed from $totalAmount to $grandTotal
-      avgOrderValue: { $avg: '$grandTotal' }, // Changed here too
-      completedOrders: {
-        $sum: { $cond: [{ $eq: ['$status', 'delivered'] }, 1, 0] }
-      },
-      pendingOrders: {
-        $sum: {
-          $cond: [
-            { $in: ['$status', ['pending', 'processing', 'shipped']] },
-            1,
-            0
-          ]
+  const orderStatsAgg = await Order.aggregate([
+    { $match: { user: user._id } },
+    {
+      $group: {
+        _id: null,
+        totalOrders: { $sum: 1 },
+        totalSpent: { $sum: '$grandTotal' }, // Changed from $totalAmount to $grandTotal
+        avgOrderValue: { $avg: '$grandTotal' }, // Changed here too
+        completedOrders: {
+          $sum: { $cond: [{ $eq: ['$status', 'delivered'] }, 1, 0] }
+        },
+        pendingOrders: {
+          $sum: {
+            $cond: [
+              { $in: ['$status', ['pending', 'processing', 'shipped']] },
+              1,
+              0
+            ]
+          }
+        },
+        cancelledOrders: {
+          $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] }
         }
-      },
-      cancelledOrders: {
-        $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] }
       }
     }
-  }
-]);
+  ]);
 
 
   const orderStats = orderStatsAgg[0] || {
@@ -1421,7 +1417,7 @@ const orderStatsAgg = await Order.aggregate([
   /* =========================
      5. MONTHLY ORDER GRAPH
      ========================= */
- const sixMonthsAgo = new Date();
+  const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
   const monthlyOrderAgg = await Order.aggregate([
@@ -1553,13 +1549,13 @@ exports.createUser = catchAsync(async (req, res, next) => {
     isActive = true,
     isEmailVerified = false
   } = req.body;
-  
+
   // Check if user already exists
   const existingUser = await User.findOne({ email });
   if (existingUser) {
     return next(new AppError('User with this email already exists', 400));
   }
-  
+
   // Create user
   const user = await User.create({
     firstName,
@@ -1571,11 +1567,11 @@ exports.createUser = catchAsync(async (req, res, next) => {
     isActive,
     isEmailVerified
   });
-  
+
   // Remove password from response
   user.password = undefined;
   user.__v = undefined;
-  
+
   // Log the activity
   await UserActivityLog.create({
     user: user._id,
@@ -1587,7 +1583,7 @@ exports.createUser = catchAsync(async (req, res, next) => {
       role: user.role
     }
   });
-  
+
   res.status(201).json({
     status: 'success',
     data: {
@@ -1609,13 +1605,13 @@ exports.updateUser = catchAsync(async (req, res, next) => {
     profileImage,
     addresses
   } = req.body;
-  
+
   // Check if user exists
   const user = await User.findById(req.params.id);
   if (!user) {
     return next(new AppError('User not found', 404));
   }
-  
+
   // Check if email is being changed and if it's already taken
   if (email && email !== user.email) {
     const existingUser = await User.findOne({ email });
@@ -1623,7 +1619,7 @@ exports.updateUser = catchAsync(async (req, res, next) => {
       return next(new AppError('Email is already taken', 400));
     }
   }
-  
+
   // Prepare update data
   const updateData = {};
   if (firstName !== undefined) updateData.firstName = firstName;
@@ -1633,7 +1629,7 @@ exports.updateUser = catchAsync(async (req, res, next) => {
   if (role !== undefined) updateData.role = role;
   if (profileImage !== undefined) updateData.profileImage = profileImage;
   if (addresses !== undefined) updateData.addresses = addresses;
-  
+
   // Update user
   const updatedUser = await User.findByIdAndUpdate(
     req.params.id,
@@ -1643,7 +1639,7 @@ exports.updateUser = catchAsync(async (req, res, next) => {
       runValidators: true
     }
   ).select('-password -__v');
-  
+
   // Log the activity
   await UserActivityLog.create({
     user: updatedUser._id,
@@ -1654,7 +1650,7 @@ exports.updateUser = catchAsync(async (req, res, next) => {
       updates: Object.keys(updateData)
     }
   });
-  
+
   res.status(200).json({
     status: 'success',
     data: {
@@ -1668,28 +1664,28 @@ exports.updateUser = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 exports.updateUserStatus = catchAsync(async (req, res, next) => {
   const { isActive } = req.body;
-  
+
   if (typeof isActive !== 'boolean') {
     return next(new AppError('isActive must be a boolean', 400));
   }
-  
+
   const user = await User.findById(req.params.id);
   if (!user) {
     return next(new AppError('User not found', 404));
   }
-  
+
   // Prevent deactivating own account
   if (req.user._id.toString() === req.params.id && !isActive) {
     return next(new AppError('You cannot deactivate your own account', 400));
   }
-  
+
   user.isActive = isActive;
   await user.save();
-  
+
   // Remove sensitive data
   user.password = undefined;
   user.__v = undefined;
-  
+
   // Log the activity
   await UserActivityLog.create({
     user: user._id,
@@ -1701,7 +1697,7 @@ exports.updateUserStatus = catchAsync(async (req, res, next) => {
       newStatus: isActive
     }
   });
-  
+
   res.status(200).json({
     status: 'success',
     data: {
@@ -1715,21 +1711,21 @@ exports.updateUserStatus = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 exports.deleteUser = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.params.id);
-  
+
   if (!user) {
     return next(new AppError('User not found', 404));
   }
-  
+
   // Prevent deleting own account
   if (req.user._id.toString() === req.params.id) {
     return next(new AppError('You cannot delete your own account', 400));
   }
-  
+
   // Prevent deleting admin accounts unless you're a superadmin
   if (user.role === 'admin' && req.user.role !== 'superadmin') {
     return next(new AppError('Only superadmins can delete admin accounts', 403));
   }
-  
+
   // Log the activity before deletion
   await UserActivityLog.create({
     user: user._id,
@@ -1741,10 +1737,10 @@ exports.deleteUser = catchAsync(async (req, res, next) => {
       userRole: user.role
     }
   });
-  
+
   // Delete user
   await User.findByIdAndDelete(req.params.id);
-  
+
   res.status(204).json({
     status: 'success',
     data: null
@@ -1756,40 +1752,40 @@ exports.deleteUser = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 exports.bulkUpdateUsers = catchAsync(async (req, res, next) => {
   const { userIds, updates } = req.body;
-  
+
   if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
     return next(new AppError('User IDs array is required', 400));
   }
-  
+
   if (!updates || typeof updates !== 'object') {
     return next(new AppError('Updates object is required', 400));
   }
-  
+
   // Prevent updating own account status
   if (updates.isActive === false && userIds.includes(req.user._id.toString())) {
     return next(new AppError('You cannot deactivate your own account', 400));
   }
-  
+
   // Filter out invalid updates
   const allowedUpdates = ['isActive', 'role', 'isEmailVerified'];
   const filteredUpdates = {};
-  
+
   Object.keys(updates).forEach(key => {
     if (allowedUpdates.includes(key)) {
       filteredUpdates[key] = updates[key];
     }
   });
-  
+
   if (Object.keys(filteredUpdates).length === 0) {
     return next(new AppError('No valid updates provided', 400));
   }
-  
+
   // Update users
   const result = await User.updateMany(
     { _id: { $in: userIds } },
     { $set: filteredUpdates }
   );
-  
+
   // Log the activity for each user
   for (const userId of userIds) {
     await UserActivityLog.create({
@@ -1802,7 +1798,7 @@ exports.bulkUpdateUsers = catchAsync(async (req, res, next) => {
       }
     });
   }
-  
+
   res.status(200).json({
     status: 'success',
     data: {
@@ -1818,17 +1814,17 @@ exports.bulkUpdateUsers = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 exports.getUserActivity = catchAsync(async (req, res, next) => {
   const { limit = 50 } = req.query;
-  
+
   const user = await User.findById(req.params.id);
   if (!user) {
     return next(new AppError('User not found', 404));
   }
-  
+
   const activityLog = await UserActivityLog.find({ user: user._id })
     .sort('-createdAt')
     .limit(parseInt(limit, 10))
     .populate('performedBy', 'firstName lastName email');
-  
+
   res.status(200).json({
     status: 'success',
     data: {
@@ -1853,30 +1849,30 @@ exports.exportUsers = catchAsync(async (req, res, next) => {
     role,
     status
   } = req.query;
-  
+
   // Build filter
   const filter = {};
-  
+
   if (startDate && endDate) {
     filter.createdAt = {
       $gte: new Date(startDate),
       $lte: new Date(endDate)
     };
   }
-  
+
   if (role && role !== 'All') {
     filter.role = role;
   }
-  
+
   if (status && status !== 'All') {
     filter.isActive = status === 'Active';
   }
-  
+
   // Get users
   const users = await User.find(filter)
     .select('-password -__v -wishlist -cart')
     .sort('-createdAt');
-  
+
   // Format data based on requested format
   if (format === 'json') {
     res.status(200).json({
@@ -1902,7 +1898,7 @@ exports.exportUsers = catchAsync(async (req, res, next) => {
       'Created At': user.createdAt.toISOString(),
       'Last Login': user.lastLogin ? user.lastLogin.toISOString() : 'Never'
     }));
-    
+
     res.status(200).json({
       status: 'success',
       data: {
@@ -1960,11 +1956,11 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
       for (let i = monthsToShow - 1; i >= 0; i--) {
         const date = new Date(nowIST);
         date.setMonth(date.getMonth() - i);
-        
+
         const year = date.getFullYear();
         const monthIndex = date.getMonth();
         const label = monthNames[monthIndex];
-        
+
         labels.push(label);
         monthsData.push({
           year: year,
@@ -1997,7 +1993,7 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
     // Fetch data for each month in parallel for better performance
     const dataPromises = monthsData.map(async (monthInfo, index) => {
       const { year, monthIndex } = monthInfo;
-      
+
       // Calculate start and end dates for this month in IST
       const monthStart = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0) - (5.5 * 60 * 60 * 1000));
       const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 1, 0, 0, 0) - (5.5 * 60 * 60 * 1000));
@@ -2026,7 +2022,7 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
 
         // Get target for this month
         let targetValue = 0;
-        
+
         // If this is the current month and we have a target, use it
         if (year === currentYear && monthIndex === currentMonth && currentMonthTarget) {
           targetValue = currentMonthTarget.targetValue;
@@ -2053,7 +2049,7 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
 
     // Wait for all promises to resolve
     const results = await Promise.all(dataPromises);
-    
+
     // Populate the data arrays
     results.forEach(result => {
       revenueData[result.index] = result.revenue;
@@ -2063,7 +2059,7 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
     // Calculate current month revenue and target
     let currentEarnings = 0;
     let monthlyTarget = 0;
-    
+
     // Current month start and end in IST
     const currentMonthStart = new Date(Date.UTC(currentYear, currentMonth, 1, 0, 0, 0) - (5.5 * 60 * 60 * 1000));
     const currentMonthEnd = new Date(Date.UTC(currentYear, currentMonth + 1, 1, 0, 0, 0) - (5.5 * 60 * 60 * 1000));
@@ -2088,7 +2084,7 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
       ]);
 
       currentEarnings = currentMonthRevenueResult[0]?.revenue || 0;
-      
+
       // Get target for current month
       if (currentMonthTarget) {
         monthlyTarget = currentMonthTarget.targetValue;
@@ -2102,13 +2098,13 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
     // Calculate growth based on period
     let revenueGrowth = 0;
     const currentPeriodRevenue = revenueData.reduce((a, b) => a + b, 0);
-    
+
     try {
       if (period === 'yearly') {
         // For yearly, compare with previous year
         const prevYearStart = new Date(Date.UTC(currentYear - 1, 0, 1, 0, 0, 0) - (5.5 * 60 * 60 * 1000));
         const prevYearEnd = new Date(Date.UTC(currentYear, 0, 1, 0, 0, 0) - (5.5 * 60 * 60 * 1000));
-        
+
         const prevRevenueResult = await Order.aggregate([
           {
             $match: {
@@ -2126,9 +2122,9 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
             }
           }
         ]);
-        
+
         const previousYearRevenue = prevRevenueResult[0]?.revenue || 0;
-        
+
         if (previousYearRevenue > 0) {
           revenueGrowth = ((currentPeriodRevenue - previousYearRevenue) / previousYearRevenue * 100).toFixed(1);
         } else if (currentPeriodRevenue > 0) {
@@ -2139,9 +2135,9 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
         const prevPeriodMonths = monthsToShow;
         const prevStartDate = new Date(monthsData[0].year, monthsData[0].monthIndex, 1);
         prevStartDate.setMonth(prevStartDate.getMonth() - prevPeriodMonths);
-        
+
         const prevEndDate = new Date(monthsData[0].year, monthsData[0].monthIndex, 1);
-        
+
         const prevRevenueResult = await Order.aggregate([
           {
             $match: {
@@ -2159,9 +2155,9 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
             }
           }
         ]);
-        
+
         const previousPeriodRevenue = prevRevenueResult[0]?.revenue || 0;
-        
+
         if (previousPeriodRevenue > 0) {
           revenueGrowth = ((currentPeriodRevenue - previousPeriodRevenue) / previousPeriodRevenue * 100).toFixed(1);
         } else if (currentPeriodRevenue > 0) {
@@ -2233,7 +2229,7 @@ exports.getUserGrowthProgress = catchAsync(async (req, res, next) => {
     };
 
     const nowIST = getISTDate();
-    
+
     // Determine number of weeks
     let weeksToShow;
     switch (period) {
@@ -2247,22 +2243,24 @@ exports.getUserGrowthProgress = catchAsync(async (req, res, next) => {
       default:
         weeksToShow = 8;
     }
-    
+
     // For "Last X Weeks", we want X complete weeks ending on last Sunday
     // Find last Sunday (end of most recent complete week)
     const lastSunday = new Date(nowIST);
     lastSunday.setDate(lastSunday.getDate() - nowIST.getDay()); // Go back to Sunday
     lastSunday.setHours(23, 59, 59, 999);
-    
+
     // Calculate start date (X weeks before last Sunday)
     const startDate = new Date(lastSunday);
     startDate.setDate(startDate.getDate() - (weeksToShow * 7) + 1); // Start from Monday of first week
-    
+
     const labels = [];
     const userGrowthData = [];
+    const guestData = [];
+    const guestConversionData = [];
     const visitorData = [];
     const conversionData = [];
-    
+
     // Helper to format week label
     const getWeekLabel = (weekStart, weekEnd) => {
       const formatDate = (date) => {
@@ -2276,17 +2274,17 @@ exports.getUserGrowthProgress = catchAsync(async (req, res, next) => {
       // Week runs from Monday to Sunday
       const weekStart = new Date(startDate);
       weekStart.setDate(weekStart.getDate() + (i * 7));
-      
+
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6); // End on Sunday (6 days after Monday)
       weekEnd.setHours(23, 59, 59, 999);
-      
+
       // Adjust for IST
       const weekStartIST = new Date(weekStart.getTime() - (5.5 * 60 * 60 * 1000));
       const weekEndIST = new Date(weekEnd.getTime() - (5.5 * 60 * 60 * 1000));
-      
+
       labels.push(getWeekLabel(weekStart, weekEnd));
-      
+
       try {
         // 1. Get new registered users for this week
         const newUsersResult = await User.countDocuments({
@@ -2297,10 +2295,33 @@ exports.getUserGrowthProgress = catchAsync(async (req, res, next) => {
           role: { $ne: 'admin' },
           isActive: true
         });
-        
+
         userGrowthData.push(newUsersResult);
 
-        // 2. Get unique visitors (sessions) for this week
+        // 2. Get new guest users for this week
+        const newGuestsResult = await GuestUser.countDocuments({
+          createdAt: {
+            $gte: weekStartIST,
+            $lte: weekEndIST
+          },
+          convertedToUser: false,
+          isActive: true
+        });
+
+        guestData.push(newGuestsResult);
+
+        // 3. Get guest-to-user conversions for this week
+        const convertedGuestsResult = await GuestUser.countDocuments({
+          convertedAt: {
+            $gte: weekStartIST,
+            $lte: weekEndIST
+          },
+          convertedToUser: true
+        });
+
+        guestConversionData.push(convertedGuestsResult);
+
+        // 4. Get unique visitors (sessions) for this week
         const uniqueVisitorsResult = await Analytics.aggregate([
           {
             $match: {
@@ -2320,7 +2341,7 @@ exports.getUserGrowthProgress = catchAsync(async (req, res, next) => {
             $count: "uniqueVisitors"
           }
         ]);
-        
+
         const totalVisitors = uniqueVisitorsResult[0]?.uniqueVisitors || 0;
         visitorData.push(totalVisitors);
 
@@ -2338,12 +2359,14 @@ exports.getUserGrowthProgress = catchAsync(async (req, res, next) => {
         if (totalVisitors > 0) {
           conversionRate = (ordersResult / totalVisitors) * 100;
         }
-        
+
         conversionData.push(parseFloat(conversionRate.toFixed(2)));
 
       } catch (error) {
         console.error(`Error fetching data for week ${i + 1}:`, error);
         userGrowthData.push(0);
+        guestData.push(0);
+        guestConversionData.push(0);
         visitorData.push(0);
         conversionData.push(0);
       }
@@ -2365,7 +2388,7 @@ exports.getUserGrowthProgress = catchAsync(async (req, res, next) => {
     if (userGrowthData.length >= 2) {
       const lastWeekUsers = userGrowthData[userGrowthData.length - 1]; // Week 8 (Dec 25-31)
       const previousWeekUsers = userGrowthData[userGrowthData.length - 2]; // Week 7 (Dec 18-24)
-      
+
       if (previousWeekUsers > 0) {
         weeklyGrowth = ((lastWeekUsers - previousWeekUsers) / previousWeekUsers * 100);
       } else if (lastWeekUsers > 0) {
@@ -2374,7 +2397,7 @@ exports.getUserGrowthProgress = catchAsync(async (req, res, next) => {
     }
 
     // Overall conversion rate for the period
-    const overallConversionRate = totalVisitorsPeriod > 0 
+    const overallConversionRate = totalVisitorsPeriod > 0
       ? (totalOrdersPeriod / totalVisitorsPeriod * 100)
       : 0;
 
@@ -2388,13 +2411,13 @@ exports.getUserGrowthProgress = catchAsync(async (req, res, next) => {
     const currentWeekNewUsers = userGrowthData[mostRecentWeekIndex] || 0;
     const currentWeekConversion = conversionData[mostRecentWeekIndex] || 0;
     const currentWeekVisitors = visitorData[mostRecentWeekIndex] || 0;
-    
+
     // Get orders for most recent week
     const mostRecentWeekStart = new Date(startDate);
     mostRecentWeekStart.setDate(mostRecentWeekStart.getDate() + (mostRecentWeekIndex * 7));
     const mostRecentWeekEnd = new Date(mostRecentWeekStart);
     mostRecentWeekEnd.setDate(mostRecentWeekEnd.getDate() + 6);
-    
+
     const currentWeekOrders = await Order.countDocuments({
       createdAt: {
         $gte: new Date(mostRecentWeekStart.getTime() - (5.5 * 60 * 60 * 1000)),
@@ -2433,12 +2456,12 @@ exports.getUserGrowthProgress = catchAsync(async (req, res, next) => {
               pointHoverRadius: 6
             }
           ],
-          
+
           // Summary metrics - refer to MOST RECENT WEEK in chart
           weeklyGrowth: parseFloat(weeklyGrowth.toFixed(1)),
           newUsersThisWeek: currentWeekNewUsers, // Users in most recent week (Dec 25-31)
           conversionRate: parseFloat(overallConversionRate.toFixed(2)), // Overall for period
-          
+
           summary: {
             totalNewUsers: totalNewUsers,
             totalVisitors: totalVisitorsPeriod,
@@ -2453,7 +2476,7 @@ exports.getUserGrowthProgress = catchAsync(async (req, res, next) => {
               end: lastSunday.toISOString().split('T')[0],
               note: 'Complete weeks only (excludes current partial week)'
             },
-            
+
             // Most recent week details (Week 8 in 8-week view)
             mostRecentWeek: {
               label: labels[labels.length - 1] || '',
@@ -2555,7 +2578,7 @@ exports.getUserConversionDetails = catchAsync(async (req, res, next) => {
           totalSessions: analyticsData.length,
           registeredSessions: analyticsData.filter(s => s.isRegistered === 1).length,
           convertingSessions: convertingUsers.length,
-          conversionRate: analyticsData.length > 0 
+          conversionRate: analyticsData.length > 0
             ? (convertingUsers.length / analyticsData.length * 100).toFixed(2)
             : 0,
           avgSessionDuration: '2m 34s', // You can calculate this from analytics
@@ -2576,9 +2599,382 @@ exports.getUserConversionDetails = catchAsync(async (req, res, next) => {
   }
 });
 
+// @desc    Set monthly target for dashboard
+// @route   POST /api/v1/admin/dashboard/set-target
+// @access  Private/Admin
+exports.setMonthlyTarget = catchAsync(async (req, res, next) => {
+  try {
+    const { targetValue, targetType = 'revenue', description } = req.body;
+    const userId = req.user.id;
 
+    if (!targetValue || targetValue <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Target value is required and must be greater than 0'
+      });
+    }
 
+    // Get current month start and end dates
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
+    // Check if there's already an active target for this month and type
+    const existingTarget = await Target.findOne({
+      userId,
+      targetType,
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+      status: 'active',
+      isActive: true
+    });
 
+    let target;
+
+    if (existingTarget) {
+      // Update existing target
+      existingTarget.targetValue = targetValue;
+      if (description) existingTarget.description = description;
+      existingTarget.lastUpdatedBy = userId;
+      await existingTarget.save();
+      target = existingTarget;
+    } else {
+      // Create new target
+      target = await Target.create({
+        userId,
+        targetType,
+        targetValue,
+        period: 'monthly',
+        startDate,
+        endDate,
+        currentValue: 0,
+        status: 'active',
+        isActive: true,
+        description: description || `Monthly ${targetType} target for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`,
+        createdBy: userId,
+        lastUpdatedBy: userId
+      });
+
+      // Calculate current value based on target type
+      if (targetType === 'revenue') {
+        const revenueData = await Order.aggregate([
+          {
+            $match: {
+              status: 'delivered',
+              createdAt: { $gte: startDate, $lte: endDate }
+            }
+          },
+          { $group: { _id: null, total: { $sum: '$grandTotal' } } }
+        ]);
+        target.currentValue = revenueData[0]?.total || 0;
+      } else if (targetType === 'orders') {
+        target.currentValue = await Order.countDocuments({
+          createdAt: { $gte: startDate, $lte: endDate }
+        });
+      } else if (targetType === 'users') {
+        target.currentValue = await User.countDocuments({
+          createdAt: { $gte: startDate, $lte: endDate },
+          role: { $ne: 'admin' }
+        });
+      }
+
+      await target.save();
+    }
+
+    res.status(existingTarget ? 200 : 201).json({
+      status: 'success',
+      message: existingTarget ? 'Target updated successfully' : 'Target created successfully',
+      data: {
+        target: {
+          id: target._id,
+          targetType: target.targetType,
+          targetValue: target.targetValue,
+          currentValue: target.currentValue,
+          progress: target.progress,
+          period: target.period,
+          startDate: target.startDate,
+          endDate: target.endDate,
+          status: target.status,
+          daysRemaining: target.daysRemaining,
+          achievementPercentage: target.achievementPercentage
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error setting monthly target:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to set monthly target',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @desc    Get monthly target for dashboard
+// @route   GET /api/v1/admin/dashboard/monthly-target
+// @access  Private/Admin
+exports.getMonthlyTarget = catchAsync(async (req, res, next) => {
+  try {
+    const { targetType = 'revenue' } = req.query;
+    const userId = req.user.id;
+
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    // Get current month target
+    let target = await Target.findOne({
+      userId,
+      targetType,
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+      status: 'active',
+      isActive: true
+    });
+
+    if (!target) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          target: null,
+          message: 'No target set for this month'
+        }
+      });
+    }
+
+    // Update current value based on target type
+    if (targetType === 'revenue') {
+      const revenueData = await Order.aggregate([
+        {
+          $match: {
+            status: 'delivered',
+            createdAt: { $gte: startDate, $lte: endDate }
+          }
+        },
+        { $group: { _id: null, total: { $sum: '$grandTotal' } } }
+      ]);
+      target.currentValue = revenueData[0]?.total || 0;
+    } else if (targetType === 'orders') {
+      target.currentValue = await Order.countDocuments({
+        createdAt: { $gte: startDate, $lte: endDate }
+      });
+    } else if (targetType === 'users') {
+      target.currentValue = await User.countDocuments({
+        createdAt: { $gte: startDate, $lte: endDate },
+        role: { $ne: 'admin' }
+      });
+    }
+
+    await target.save();
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        target: {
+          id: target._id,
+          targetType: target.targetType,
+          targetValue: target.targetValue,
+          currentValue: target.currentValue,
+          progress: target.progress,
+          period: target.period,
+          startDate: target.startDate,
+          endDate: target.endDate,
+          status: target.status,
+          daysRemaining: target.daysRemaining,
+          achievementPercentage: target.achievementPercentage,
+          periodLabel: target.periodLabel
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting monthly target:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to get monthly target',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @desc    Get recent orders for dashboard
+// @route   GET /api/v1/admin/dashboard/recent-orders
+// @access  Private/Admin
+exports.getRecentOrders = catchAsync(async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+
+    const recentOrders = await Order.find()
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate('user', 'firstName lastName email profileImage')
+      .select('orderNumber status grandTotal paymentStatus shippingStatus createdAt items');
+
+    res.status(200).json({
+      status: 'success',
+      results: recentOrders.length,
+      data: {
+        orders: recentOrders
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting recent orders:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to get recent orders',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @desc    Get recent users for dashboard
+// @route   GET /api/v1/admin/dashboard/recent-users
+// @access  Private/Admin
+exports.getRecentUsers = catchAsync(async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+
+    const recentUsers = await User.find({ role: { $ne: 'admin' } })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .select('firstName lastName email profileImage createdAt isActive lastLogin');
+
+    // Get order counts for each user
+    const usersWithStats = await Promise.all(
+      recentUsers.map(async (user) => {
+        const orderCount = await Order.countDocuments({ user: user._id });
+        const totalSpent = await Order.aggregate([
+          { $match: { user: user._id, status: 'delivered' } },
+          { $group: { _id: null, total: { $sum: '$grandTotal' } } }
+        ]);
+
+        return {
+          ...user.toObject(),
+          orderCount,
+          totalSpent: totalSpent[0]?.total || 0
+        };
+      })
+    );
+
+    res.status(200).json({
+      status: 'success',
+      results: usersWithStats.length,
+      data: {
+        users: usersWithStats
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting recent users:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to get recent users',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @desc    Get performance metrics for dashboard
+// @route   GET /api/v1/admin/dashboard/performance-metrics
+// @access  Private/Admin
+exports.getPerformanceMetrics = catchAsync(async (req, res, next) => {
+  try {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const sixtyDaysAgo = new Date(now);
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+
+    // Get order metrics
+    const [
+      totalOrdersLast30Days,
+      totalOrdersPrev30Days,
+      deliveredOrdersLast30Days,
+      avgOrderValue,
+      revenueByPaymentMethod
+    ] = await Promise.all([
+      Order.countDocuments({ createdAt: { $gte: thirtyDaysAgo } }),
+      Order.countDocuments({ createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } }),
+      Order.countDocuments({ status: 'delivered', createdAt: { $gte: thirtyDaysAgo } }),
+      Order.aggregate([
+        { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+        { $group: { _id: null, avgValue: { $avg: '$grandTotal' } } }
+      ]),
+      Order.aggregate([
+        { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+        { $group: { _id: '$paymentMethod', total: { $sum: '$grandTotal' }, count: { $sum: 1 } } }
+      ])
+    ]);
+
+    // Calculate fulfillment rate
+    const fulfillmentRate = totalOrdersLast30Days > 0
+      ? ((deliveredOrdersLast30Days / totalOrdersLast30Days) * 100).toFixed(2)
+      : 0;
+
+    // Calculate order growth
+    const orderGrowth = totalOrdersPrev30Days > 0
+      ? (((totalOrdersLast30Days - totalOrdersPrev30Days) / totalOrdersPrev30Days) * 100).toFixed(2)
+      : 0;
+
+    // Get product metrics
+    const totalProducts = await Product.countDocuments({ isActive: true });
+    const lowStockProducts = await Product.countDocuments({
+      isActive: true,
+      stock: { $lte: 10, $gt: 0 }
+    });
+    const outOfStockProducts = await Product.countDocuments({
+      isActive: true,
+      stock: 0
+    });
+
+    // Get user metrics
+    const newUsersLast30Days = await User.countDocuments({
+      createdAt: { $gte: thirtyDaysAgo },
+      role: { $ne: 'admin' }
+    });
+    const activeUsers = await User.countDocuments({
+      lastLogin: { $gte: thirtyDaysAgo },
+      role: { $ne: 'admin' }
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        orders: {
+          totalOrders: totalOrdersLast30Days,
+          orderGrowth: parseFloat(orderGrowth),
+          fulfillmentRate: parseFloat(fulfillmentRate),
+          avgOrderValue: avgOrderValue[0]?.avgValue?.toFixed(2) || 0,
+          revenueByPaymentMethod
+        },
+        products: {
+          totalProducts,
+          lowStockProducts,
+          outOfStockProducts,
+          healthyStockRate: totalProducts > 0
+            ? (((totalProducts - lowStockProducts - outOfStockProducts) / totalProducts) * 100).toFixed(2)
+            : 100
+        },
+        users: {
+          newUsers: newUsersLast30Days,
+          activeUsers,
+          engagementRate: newUsersLast30Days > 0
+            ? ((activeUsers / newUsersLast30Days) * 100).toFixed(2)
+            : 0
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting performance metrics:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to get performance metrics',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
 
 

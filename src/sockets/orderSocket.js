@@ -1,5 +1,7 @@
 const socketIO = require('socket.io');
 const Order = require('../models/Order');
+const Notification = require('../models/Notification');
+const Product = require('../models/Product');
 
 let io;
 const adminSockets = new Map(); // Map to store admin socket connections
@@ -96,31 +98,26 @@ exports.notifyNewOrder = async (orderId) => {
   try {
     const order = await Order.findById(orderId)
       .populate('user', 'firstName lastName');
-    
+
     if (!order) return;
-    
-    const notification = {
+
+    const notificationData = {
       type: 'new_order',
       orderId: order.orderId,
-      userId: order.user._id,
-      userName: `${order.user.firstName} ${order.user.lastName}`,
+      orderDbId: order._id,
+      userId: order.user?._id,
+      userName: order.user ? `${order.user.firstName} ${order.user.lastName}` : 'Guest',
       total: order.grandTotal,
-      itemsCount: order.items.length,
+      itemsCount: order.items?.length || 0,
       timestamp: new Date()
     };
-    
-    exports.emitOrderNotification('new_order', notification);
-    
-    // Also log to database for persistence
-    await Notification.create({
-      type: 'admin_notification',
-      title: 'New Order Received',
-      message: `New order ${order.orderId} from ${order.user.firstName}`,
-      data: notification,
-      recipients: ['admin'],
-      readBy: []
-    });
-    
+
+    // Emit real-time notification
+    exports.emitOrderNotification('new_order', notificationData);
+
+    // Persist notification to database
+    await Notification.createOrderNotification(order, 'new_order');
+
   } catch (error) {
     console.error('Error notifying new order:', error);
   }
@@ -130,10 +127,10 @@ exports.notifyNewOrder = async (orderId) => {
 exports.notifyLowStock = async (productId) => {
   try {
     const product = await Product.findById(productId);
-    
+
     if (!product) return;
-    
-    const notification = {
+
+    const notificationData = {
       type: 'low_stock',
       productId: product._id,
       productName: product.name,
@@ -142,9 +139,13 @@ exports.notifyLowStock = async (productId) => {
       threshold: product.lowStockThreshold,
       timestamp: new Date()
     };
-    
-    exports.emitOrderNotification('low_stock_alert', notification);
-    
+
+    // Emit real-time notification
+    exports.emitOrderNotification('low_stock_alert', notificationData);
+
+    // Persist notification to database
+    await Notification.createStockAlert(product, 'low_stock');
+
   } catch (error) {
     console.error('Error notifying low stock:', error);
   }

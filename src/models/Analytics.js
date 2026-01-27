@@ -18,6 +18,14 @@ const analyticsSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+  guestUser: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'GuestUser'
+  },
+  guestId: {
+    type: String,
+    index: true
+  },
   sessionId: {
     type: String,
     required: [true, 'Session ID is required']
@@ -52,7 +60,7 @@ analyticsSchema.index({ timestamp: -1 });
 analyticsSchema.index({ date: 1, type: 1, entityId: 1 });
 
 // Pre-save middleware to set date field
-analyticsSchema.pre('save', function(next) {
+analyticsSchema.pre('save', function (next) {
   // Set date to beginning of day for aggregation
   const date = new Date(this.timestamp || Date.now());
   date.setHours(0, 0, 0, 0);
@@ -61,14 +69,14 @@ analyticsSchema.pre('save', function(next) {
 });
 
 // Static method to get daily statistics
-analyticsSchema.statics.getDailyStats = async function(startDate, endDate) {
+analyticsSchema.statics.getDailyStats = async function (startDate, endDate) {
   const matchStage = {
     date: {
       $gte: new Date(startDate),
       $lte: new Date(endDate)
     }
   };
-  
+
   return this.aggregate([
     { $match: matchStage },
     {
@@ -97,7 +105,7 @@ analyticsSchema.statics.getDailyStats = async function(startDate, endDate) {
 };
 
 // Static method to get product analytics
-analyticsSchema.statics.getProductAnalytics = async function(productId, startDate, endDate) {
+analyticsSchema.statics.getProductAnalytics = async function (productId, startDate, endDate) {
   const matchStage = {
     entityId: productId,
     entityType: 'Product',
@@ -106,7 +114,7 @@ analyticsSchema.statics.getProductAnalytics = async function(productId, startDat
       $lte: new Date(endDate)
     }
   };
-  
+
   return this.aggregate([
     { $match: matchStage },
     {
@@ -152,10 +160,10 @@ analyticsSchema.statics.getProductAnalytics = async function(productId, startDat
 };
 
 // Static method to get popular products
-analyticsSchema.statics.getPopularProducts = async function(limit = 10, days = 30) {
+analyticsSchema.statics.getPopularProducts = async function (limit = 10, days = 30) {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
-  
+
   return this.aggregate([
     {
       $match: {

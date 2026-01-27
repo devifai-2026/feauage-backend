@@ -65,7 +65,7 @@ exports.createTarget = catchAsync(async (req, res, next) => {
   if (req.body.period !== 'custom' && !req.body.endDate) {
     const start = new Date(req.body.startDate || new Date());
     let end = new Date(start);
-    
+   
     switch(req.body.period) {
       case 'daily':
         end.setDate(end.getDate() + 1);

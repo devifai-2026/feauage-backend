@@ -17,6 +17,11 @@ const bannerSchema = new mongoose.Schema({
     required: [true, 'Image URL is required']
   },
   mobileImage: String,
+  bannerType: {
+    type: String,
+    enum: ['header', 'footer', 'promotional', 'slider'],
+    default: 'header'
+  },
   linkType: {
     type: String,
     enum: ['product', 'category', 'collection', 'url', 'none'],
@@ -25,7 +30,7 @@ const bannerSchema = new mongoose.Schema({
   linkTarget: String,
   page: {
     type: String,
-    enum: ['home', 'category', 'product', 'cart', 'checkout'],
+    enum: ['home', 'category', 'product', 'cart', 'checkout', 'all'],
     default: 'home'
   },
   position: {
@@ -67,6 +72,7 @@ bannerSchema.index({ page: 1, position: 1, displayOrder: 1 });
 bannerSchema.index({ isActive: 1 });
 bannerSchema.index({ startDate: 1, endDate: 1 });
 bannerSchema.index({ createdBy: 1 });
+bannerSchema.index({ bannerType: 1 });
 
 // Virtual for validity status
 bannerSchema.virtual('isValid').get(function() {

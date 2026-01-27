@@ -8,6 +8,11 @@ const {
   getRevenueOverview,
   getRevenueBreakdown,
   getUserGrowthProgress,
+  setMonthlyTarget,
+  getMonthlyTarget,
+  getRecentOrders,
+  getRecentUsers,
+  getPerformanceMetrics,
 } = require("../controllers/admin/adminController");
 
 const {
@@ -83,6 +88,26 @@ const {
   exportStockReport,
 } = require("../controllers/admin/stockController");
 
+const {
+  getNotifications,
+  getUnreadCount,
+  getRecentNotifications,
+  markAsRead,
+  markAllAsRead,
+  deleteNotification,
+  clearAllNotifications,
+  getNotification,
+} = require("../controllers/admin/notificationController");
+
+const {
+  getProfile,
+  updateProfile,
+  updatePassword,
+  uploadProfileImage,
+  deleteProfileImage,
+  getActivityLog,
+} = require("../controllers/admin/profileController");
+
 const { protect, restrictTo, isAdmin } = require("../middleware/auth");
 const {
   uploadProductImages: uploadProductImagesMiddleware,
@@ -101,6 +126,11 @@ router.use(restrictTo("admin", "superadmin"));
 router.get("/dashboard/stats", getDashboardStats);
 router.get("/dashboard/revenue-overview", getRevenueOverview);
 router.get("/dashboard/user-growth-progress", getUserGrowthProgress);
+router.get("/dashboard/monthly-target", getMonthlyTarget);
+router.post("/dashboard/set-target", setMonthlyTarget);
+router.get("/dashboard/recent-orders", getRecentOrders);
+router.get("/dashboard/recent-users", getRecentUsers);
+router.get("/dashboard/performance-metrics", getPerformanceMetrics);
 router.get("/activities", getAdminActivities);
 router.get("/health", getSystemHealth);
 router.get("/users/stats", getUserStatistics);
@@ -188,6 +218,24 @@ router.get("/stock/alerts", getStockAlerts);
 router.get("/stock/export", exportStockReport);
 
 
+
+// Notification routes
+router.get("/notifications", getNotifications);
+router.get("/notifications/unread-count", getUnreadCount);
+router.get("/notifications/recent", getRecentNotifications);
+router.patch("/notifications/mark-all-read", markAllAsRead);
+router.delete("/notifications/clear-all", clearAllNotifications);
+router.get("/notifications/:id", getNotification);
+router.patch("/notifications/:id/read", markAsRead);
+router.delete("/notifications/:id", deleteNotification);
+
+// Profile routes
+router.get("/profile", getProfile);
+router.patch("/profile", updateProfile);
+router.patch("/profile/password", updatePassword);
+router.post("/profile/image", uploadProfileImage);
+router.delete("/profile/image", deleteProfileImage);
+router.get("/profile/activity", getActivityLog);
 
 //aws routes
 router.post("/s3/presigned-url", generatePresignedUrl);

@@ -22,6 +22,7 @@ const adminRoutes = require('./routes/admin');
 const webhookRoutes = require('./routes/webhook');
 const targetRoutes = require('./routes/targetRoutes');
 const adminUserRoutes = require('./routes/adminUsers');
+const guestRoutes = require('./routes/guest');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -108,6 +109,7 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/admin/users', adminUserRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/targets', targetRoutes);
+app.use('/api/v1/guest', guestRoutes);
 
 // Health check endpoint
 app.get('/api/v1/health', (req, res) => {
@@ -123,7 +125,7 @@ app.get('/api/v1/health', (req, res) => {
 app.get('/api/v1/endpoints', (req, res) => {
   const baseUrl = `${req.protocol}://${req.get('host')}`;
   const endpoints = [];
-  
+
   function processStack(stack, path = '') {
     stack.forEach((middleware) => {
       if (middleware.route) {
@@ -147,9 +149,9 @@ app.get('/api/v1/endpoints', (req, res) => {
       }
     });
   }
-  
+
   processStack(app._router.stack);
-  
+
   res.status(200).json({
     status: 'success',
     baseUrl: baseUrl,
@@ -167,10 +169,10 @@ app.all('*', (req, res, next) => {
 app.use(errorHandler);
 
 // Export the function to get routes for server.js
-app.getRegisteredRoutes = function() {
+app.getRegisteredRoutes = function () {
   const routes = [];
   const baseUrl = `http://localhost:${process.env.PORT || 5000}`;
-  
+
   function processStack(stack, path = '') {
     stack.forEach((middleware) => {
       if (middleware.route) {
@@ -191,7 +193,7 @@ app.getRegisteredRoutes = function() {
       }
     });
   }
-  
+
   processStack(app._router.stack);
   return routes;
 };
