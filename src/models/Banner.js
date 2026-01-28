@@ -1,33 +1,71 @@
 const mongoose = require('mongoose');
 
-const bannerSchema = new mongoose.Schema({
-  title: {
-    type: String,
-    required: [true, 'Title is required'],
-    trim: true,
-    maxlength: [100, 'Title cannot exceed 100 characters']
-  },
-  subtitle: {
-    type: String,
-    trim: true,
-    maxlength: [200, 'Subtitle cannot exceed 200 characters']
-  },
-  image: {
+const bannerImageSchema = new mongoose.Schema({
+  url: {
     type: String,
     required: [true, 'Image URL is required']
   },
-  mobileImage: String,
+  alt: {
+    type: String,
+    default: ''
+  },
+  displayOrder: {
+    type: Number,
+    default: 0
+  },
+  isPrimary: {
+    type: Boolean,
+    default: false
+  }
+}, { _id: true });
+
+const bannerSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Banner name is required'],
+    unique: true,
+    trim: true,
+    lowercase: true,
+    maxlength: [100, 'Name cannot exceed 100 characters']
+  },
+  title: {
+    type: String,
+    trim: true,
+    maxlength: [200, 'Title cannot exceed 200 characters']
+  },
+  subheader: {
+    type: String,
+    trim: true,
+    maxlength: [300, 'Subheader cannot exceed 300 characters']
+  },
+  body: {
+    type: String,
+    trim: true,
+    maxlength: [1000, 'Body cannot exceed 1000 characters']
+  },
+  footer: {
+    type: String,
+    trim: true,
+    maxlength: [200, 'Footer cannot exceed 200 characters']
+  },
+  images: {
+    type: [bannerImageSchema],
+    validate: {
+      validator: function (images) {
+        return images && images.length > 0;
+      },
+      message: 'At least one image is required'
+    }
+  },
+  redirectUrl: {
+    type: String,
+    trim: true
+  },
   bannerType: {
     type: String,
-    enum: ['header', 'footer', 'promotional', 'slider'],
-    default: 'header'
+    enum: ['header', 'footer', 'promotional', 'slider', 'hero'],
+    default: 'promotional'
   },
-  linkType: {
-    type: String,
-    enum: ['product', 'category', 'collection', 'url', 'none'],
-    default: 'none'
-  },
-  linkTarget: String,
   page: {
     type: String,
     enum: ['home', 'category', 'product', 'cart', 'checkout', 'all'],
@@ -35,7 +73,7 @@ const bannerSchema = new mongoose.Schema({
   },
   position: {
     type: String,
-    enum: ['top', 'middle', 'bottom', 'sidebar', 'popup'],
+    enum: ['top', 'middle', 'bottom', 'sidebar', 'popup', 'hero'],
     default: 'top'
   },
   displayOrder: {
@@ -68,6 +106,7 @@ const bannerSchema = new mongoose.Schema({
 });
 
 // Indexes
+bannerSchema.index({ name: 1 }, { unique: true });
 bannerSchema.index({ page: 1, position: 1, displayOrder: 1 });
 bannerSchema.index({ isActive: 1 });
 bannerSchema.index({ startDate: 1, endDate: 1 });
@@ -75,7 +114,7 @@ bannerSchema.index({ createdBy: 1 });
 bannerSchema.index({ bannerType: 1 });
 
 // Virtual for validity status
-bannerSchema.virtual('isValid').get(function() {
+bannerSchema.virtual('isValid').get(function () {
   const now = new Date();
   return (
     this.isActive &&
@@ -84,30 +123,28 @@ bannerSchema.virtual('isValid').get(function() {
   );
 });
 
-// Virtual for target URL
-bannerSchema.virtual('targetUrl').get(function() {
-  if (!this.linkTarget) return '#';
-  
-  switch (this.linkType) {
-    case 'product':
-      return `/products/${this.linkTarget}`;
-    case 'category':
-      return `/categories/${this.linkTarget}`;
-    case 'collection':
-      return `/collections/${this.linkTarget}`;
-    case 'url':
-      return this.linkTarget;
-    default:
-      return '#';
-  }
+// Virtual for primary image
+bannerSchema.virtual('primaryImage').get(function () {
+  if (!this.images || this.images.length === 0) return null;
+  const primary = this.images.find(img => img.isPrimary);
+  return primary || this.images[0];
 });
 
 // Pre-save middleware
-bannerSchema.pre('save', function(next) {
+bannerSchema.pre('save', function (next) {
   // Ensure endDate is after startDate
   if (this.endDate && this.endDate <= this.startDate) {
     this.endDate = new Date(this.startDate.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days later
   }
+
+  // Ensure at least one image is marked as primary
+  if (this.images && this.images.length > 0) {
+    const hasPrimary = this.images.some(img => img.isPrimary);
+    if (!hasPrimary) {
+      this.images[0].isPrimary = true;
+    }
+  }
+
   next();
 });
 
