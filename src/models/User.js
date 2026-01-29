@@ -34,7 +34,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     trim: true,
     validate: {
-      validator: function(v) {
+      validator: function (v) {
         return /^[0-9]{10}$/.test(v);
       },
       message: 'Phone number must be 10 digits'
@@ -51,7 +51,7 @@ const userSchema = new mongoose.Schema({
   dateOfBirth: {
     type: Date,
     validate: {
-      validator: function(v) {
+      validator: function (v) {
         return v <= new Date();
       },
       message: 'Date of birth cannot be in the future'
@@ -71,7 +71,6 @@ const userSchema = new mongoose.Schema({
     default: 'customer'
   },
   addresses: [{
-    _id: false,
     type: {
       type: String,
       enum: ['home', 'office', 'other'],
@@ -94,7 +93,7 @@ const userSchema = new mongoose.Schema({
       type: String,
       required: [true, 'Pincode is required'],
       validate: {
-        validator: function(v) {
+        validator: function (v) {
           return /^[1-9][0-9]{5}$/.test(v);
         },
         message: 'Please provide a valid Indian pincode'
@@ -150,7 +149,7 @@ userSchema.index({ createdAt: -1 });
 userSchema.index({ isActive: 1 });
 
 // Virtual for full name
-userSchema.virtual('fullName').get(function() {
+userSchema.virtual('fullName').get(function () {
   return `${this.firstName} ${this.lastName}`;
 });
 
@@ -169,28 +168,28 @@ userSchema.virtual('reviews', {
 });
 
 // Pre-save middleware to hash password
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
-  
+
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
 // Update passwordChangedAt when password is modified
-userSchema.pre('save', function(next) {
+userSchema.pre('save', function (next) {
   if (!this.isModified('password') || this.isNew) return next();
-  
+
   this.passwordChangedAt = Date.now() - 1000;
   next();
 });
 
 // Instance method to check password
-userSchema.methods.correctPassword = async function(candidatePassword) {
+userSchema.methods.correctPassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
 // Instance method to check if password changed after JWT was issued
-userSchema.methods.changedPasswordAfter = function(JWTTimestamp) {
+userSchema.methods.changedPasswordAfter = function (JWTTimestamp) {
   if (this.passwordChangedAt) {
     const changedTimestamp = parseInt(this.passwordChangedAt.getTime() / 1000, 10);
     return JWTTimestamp < changedTimestamp;
@@ -199,53 +198,53 @@ userSchema.methods.changedPasswordAfter = function(JWTTimestamp) {
 };
 
 // Instance method to create password reset token
-userSchema.methods.createPasswordResetToken = function() {
+userSchema.methods.createPasswordResetToken = function () {
   const resetToken = crypto.randomBytes(32).toString('hex');
-  
+
   this.passwordResetToken = crypto
     .createHash('sha256')
     .update(resetToken)
     .digest('hex');
-    
+
   this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
-  
+
   return resetToken;
 };
 
 // Instance method to create email verification token
-userSchema.methods.createEmailVerificationToken = function() {
+userSchema.methods.createEmailVerificationToken = function () {
   const verificationToken = crypto.randomBytes(32).toString('hex');
-  
+
   this.emailVerificationToken = crypto
     .createHash('sha256')
     .update(verificationToken)
     .digest('hex');
-    
+
   this.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-  
+
   return verificationToken;
 };
 
 // Instance method to check if account is locked
-userSchema.methods.isLocked = function() {
+userSchema.methods.isLocked = function () {
   return !!(this.lockUntil && this.lockUntil > Date.now());
 };
 
 // Instance method to increment login attempts
-userSchema.methods.incLoginAttempts = function() {
+userSchema.methods.incLoginAttempts = function () {
   if (this.lockUntil && this.lockUntil < Date.now()) {
     return this.updateOne({
       $set: { loginAttempts: 1 },
       $unset: { lockUntil: 1 }
     });
   }
-  
+
   const updates = { $inc: { loginAttempts: 1 } };
-  
+
   if (this.loginAttempts + 1 >= 5 && !this.isLocked()) {
     updates.$set = { lockUntil: Date.now() + 2 * 60 * 60 * 1000 }; // 2 hours
   }
-  
+
   return this.updateOne(updates);
 };
 

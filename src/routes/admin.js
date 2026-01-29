@@ -17,6 +17,7 @@ const {
 
 const {
   getAllProducts,
+  getProduct,
   createProduct,
   updateProduct,
   deleteProduct,
@@ -151,7 +152,7 @@ router.patch("/products/images/:imageId/set-primary", setPrimaryImage);
 router.delete("/products/images/:imageId", deleteProductImage);
 router.get("/products/:id/stock-history", getStockHistory);
 router.patch("/products/:id/stock", updateStock);
-router.route("/products/:id").patch(updateProduct).delete(deleteProduct);
+router.route("/products/:id").get(getProduct).patch(updateProduct).delete(deleteProduct);
 
 // Category routes
 router.get("/categories", getAllCategories);

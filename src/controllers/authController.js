@@ -141,9 +141,9 @@ exports.login = catchAsync(async (req, res, next) => {
     return next(new AppError('Your account has been deactivated. Please contact support.', 403));
   }
   // 4) Check if email is verified
-  if (!user.isEmailVerified) {
-    return next(new AppError('Please verify your email address before logging in', 401));
-  }
+  // if (!user.isEmailVerified) {
+  //   return next(new AppError('Please verify your email address before logging in', 401));
+  // }
 
   // 5) Check if account is locked
   if (user.isLocked()) {

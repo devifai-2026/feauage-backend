@@ -11,6 +11,7 @@ const Analytics = require('../models/Analytics');
 const { emitOrderNotification } = require('../sockets/orderSocket');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
+const APIFeatures = require('../utils/apiFeatures');
 const razorpay = require('../configs/razorpay');
 const { TAX_RATES, SHIPPING } = require('../constants');
 

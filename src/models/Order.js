@@ -123,7 +123,7 @@ orderSchema.virtual('addresses', {
 });
 
 // Virtual for formatted date
-orderSchema.virtual('formattedDate').get(function() {
+orderSchema.virtual('formattedDate').get(function () {
   return this.createdAt.toLocaleDateString('en-IN', {
     day: '2-digit',
     month: 'short',
@@ -132,20 +132,20 @@ orderSchema.virtual('formattedDate').get(function() {
 });
 
 // Virtual for item count
-orderSchema.virtual('itemCount').get(async function() {
+orderSchema.virtual('itemCount').get(async function () {
   const OrderItem = mongoose.model('OrderItem');
   const items = await OrderItem.find({ order: this._id });
   return items.reduce((sum, item) => sum + item.quantity, 0);
 });
 
 // Pre-save middleware to generate order ID
-orderSchema.pre('save', async function(next) {
+orderSchema.pre('save', async function (next) {
   if (this.isNew) {
     const date = new Date();
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
-    
+
     // Get count of today's orders
     const Order = mongoose.model('Order');
     const count = await Order.countDocuments({
@@ -154,34 +154,34 @@ orderSchema.pre('save', async function(next) {
         $lt: new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1)
       }
     });
-    
+
     this.orderId = `ORD${year}${month}${day}${String(count + 1).padStart(4, '0')}`;
-    
+
     // Generate invoice number
     this.invoiceNumber = `INV${year}${month}${day}${String(count + 1).padStart(4, '0')}`;
   }
-  
+
   this.updatedAt = Date.now();
   next();
 });
 
 // Post-save middleware to update product purchase count and target progress
-orderSchema.post('save', async function(doc) {
+orderSchema.post('save', async function (doc) {
   try {
     if (doc.status === 'delivered') {
       const Product = mongoose.model('Product');
       const OrderItem = mongoose.model('OrderItem');
       const Target = mongoose.model('Target');
-      
+
       // Update product purchase counts
       const items = await OrderItem.find({ order: doc._id });
-      
+
       for (const item of items) {
         await Product.findByIdAndUpdate(item.product, {
           $inc: { purchaseCount: item.quantity }
         });
       }
-      
+
       // Update target progress
       // Find all active revenue targets for this user that include the order date
       const activeTargets = await Target.find({
@@ -192,7 +192,7 @@ orderSchema.post('save', async function(doc) {
         endDate: { $gte: doc.createdAt },
         status: 'active'
       });
-      
+
       // Update each target
       for (const target of activeTargets) {
         // Calculate total delivered revenue for this user within the target period
@@ -214,9 +214,9 @@ orderSchema.post('save', async function(doc) {
             }
           }
         ]);
-        
+
         const currentValue = totalRevenue[0]?.total || 0;
-        
+
         // Update the target's current value and let the pre-save hook calculate progress
         await Target.findByIdAndUpdate(target._id, {
           currentValue: currentValue,
@@ -231,12 +231,12 @@ orderSchema.post('save', async function(doc) {
 });
 
 // Post-findOneAndUpdate middleware to handle status changes
-orderSchema.post('findOneAndUpdate', async function(doc) {
+orderSchema.post('findOneAndUpdate', async function (doc) {
   try {
     if (doc && this.getUpdate().$set && this.getUpdate().$set.status === 'delivered') {
       const Target = mongoose.model('Target');
       const Order = mongoose.model('Order');
-      
+
       // Find all active revenue targets for this user that include the order date
       const activeTargets = await Target.find({
         userId: doc.user,
@@ -246,7 +246,7 @@ orderSchema.post('findOneAndUpdate', async function(doc) {
         endDate: { $gte: doc.createdAt },
         status: 'active'
       });
-      
+
       // Update each target
       for (const target of activeTargets) {
         // Calculate total delivered revenue for this user within the target period
@@ -268,9 +268,9 @@ orderSchema.post('findOneAndUpdate', async function(doc) {
             }
           }
         ]);
-        
+
         const currentValue = totalRevenue[0]?.total || 0;
-        
+
         // Update the target's current value
         await Target.findByIdAndUpdate(target._id, {
           currentValue: currentValue,
@@ -284,16 +284,16 @@ orderSchema.post('findOneAndUpdate', async function(doc) {
 });
 
 // Static method to get order statistics
-orderSchema.statics.getStatistics = async function(startDate, endDate) {
+orderSchema.statics.getStatistics = async function (startDate, endDate) {
   const matchStage = {};
-  
+
   if (startDate && endDate) {
     matchStage.createdAt = {
       $gte: new Date(startDate),
       $lte: new Date(endDate)
     };
   }
-  
+
   const stats = await this.aggregate([
     { $match: matchStage },
     {
@@ -323,7 +323,7 @@ orderSchema.statics.getStatistics = async function(startDate, endDate) {
       }
     }
   ]);
-  
+
   return stats[0] || {
     totalOrders: 0,
     totalRevenue: 0,
@@ -338,15 +338,15 @@ orderSchema.statics.getStatistics = async function(startDate, endDate) {
 };
 
 // Helper method to update target progress
-orderSchema.statics.updateTargetProgress = async function(userId, orderId) {
+orderSchema.statics.updateTargetProgress = async function (userId, orderId) {
   try {
     const Order = mongoose.model('Order');
     const Target = mongoose.model('Target');
-    
+
     // Get the order
     const order = await Order.findById(orderId);
     if (!order || order.status !== 'delivered') return;
-    
+
     // Find all active revenue targets for this user that include the order date
     const activeTargets = await Target.find({
       userId: order.user,
@@ -356,7 +356,7 @@ orderSchema.statics.updateTargetProgress = async function(userId, orderId) {
       endDate: { $gte: order.createdAt },
       status: 'active'
     });
-    
+
     // Update each target
     for (const target of activeTargets) {
       // Calculate total delivered revenue for this user within the target period
@@ -378,9 +378,9 @@ orderSchema.statics.updateTargetProgress = async function(userId, orderId) {
           }
         }
       ]);
-      
+
       const currentValue = totalRevenue[0]?.total || 0;
-      
+
       // Update the target's current value
       await Target.findByIdAndUpdate(target._id, {
         currentValue: currentValue,
