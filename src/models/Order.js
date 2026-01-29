@@ -124,23 +124,19 @@ orderSchema.virtual('addresses', {
 
 // Virtual for formatted date
 orderSchema.virtual('formattedDate').get(function () {
-  return this.createdAt.toLocaleDateString('en-IN', {
+  if (!this.createdAt) return '';
+  return new Date(this.createdAt).toLocaleDateString('en-IN', {
     day: '2-digit',
     month: 'short',
     year: 'numeric'
   });
 });
 
-// Virtual for item count
-orderSchema.virtual('itemCount').get(async function () {
-  const OrderItem = mongoose.model('OrderItem');
-  const items = await OrderItem.find({ order: this._id });
-  return items.reduce((sum, item) => sum + item.quantity, 0);
-});
+// Remove problematic async virtual itemCount
 
-// Pre-save middleware to generate order ID
-orderSchema.pre('save', async function (next) {
-  if (this.isNew) {
+// Pre-validate middleware to generate order ID and invoice number
+orderSchema.pre('validate', async function (next) {
+  if (this.isNew && !this.orderId) {
     const date = new Date();
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -158,10 +154,14 @@ orderSchema.pre('save', async function (next) {
     this.orderId = `ORD${year}${month}${day}${String(count + 1).padStart(4, '0')}`;
 
     // Generate invoice number
-    this.invoiceNumber = `INV${year}${month}${day}${String(count + 1).padStart(4, '0')}`;
+    if (!this.invoiceNumber) {
+      this.invoiceNumber = `INV${year}${month}${day}${String(count + 1).padStart(4, '0')}`;
+    }
   }
 
-  this.updatedAt = Date.now();
+  if (this.isModified()) {
+    this.updatedAt = Date.now();
+  }
   next();
 });
 

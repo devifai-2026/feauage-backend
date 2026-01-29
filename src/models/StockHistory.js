@@ -39,7 +39,7 @@ const stockHistorySchema = new mongoose.Schema({
   },
   referenceType: {
     type: String,
-    enum: ['Order', 'PurchaseOrder', 'Return', 'Adjustment', null],
+    enum: ['Order', 'PurchaseOrder', 'Return', 'Adjustment', 'Manual', 'order', 'manual', null],
     default: null
   },
   performedBy: {

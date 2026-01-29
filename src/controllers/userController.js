@@ -34,8 +34,7 @@ exports.getAllUsers = catchAsync(async (req, res, next) => {
 exports.getUser = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.params.id)
     .populate('cart')
-    .populate('wishlist')
-    .populate('addresses');
+    .populate('wishlist');
 
   if (!user) {
     return next(new AppError('User not found', 404));
@@ -124,16 +123,27 @@ exports.getUserAddresses = catchAsync(async (req, res, next) => {
 exports.addUserAddress = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user.id);
 
+  if (!user) {
+    return next(new AppError('User not found', 404));
+  }
+
+  // Map defaults for required fields if missing from the request
+  const addressData = {
+    ...req.body,
+    name: req.body.name || `${user.firstName} ${user.lastName}`,
+    phone: req.body.phone || user.phone
+  };
+
   // If this is the first address or user wants to set as default, set isDefault to true
-  if (user.addresses.length === 0 || req.body.isDefault) {
+  if (user.addresses.length === 0 || addressData.isDefault) {
     // Reset all other addresses to non-default
     user.addresses.forEach(address => {
       address.isDefault = false;
     });
-    req.body.isDefault = true;
+    addressData.isDefault = true;
   }
 
-  user.addresses.push(req.body);
+  user.addresses.push(addressData);
   await user.save();
 
   res.status(201).json({
@@ -150,21 +160,28 @@ exports.addUserAddress = catchAsync(async (req, res, next) => {
 exports.updateUserAddress = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user.id);
 
+  if (!user) {
+    return next(new AppError('User not found', 404));
+  }
+
   const address = user.addresses.id(req.params.addressId);
 
   if (!address) {
     return next(new AppError('Address not found', 404));
   }
 
+  // Mongoose aliases will handle mapping of fields like addressLine1, type, etc.
+  const updateData = { ...req.body };
+
   // If setting as default, reset all other addresses
-  if (req.body.isDefault) {
+  if (updateData.isDefault) {
     user.addresses.forEach(addr => {
       addr.isDefault = false;
     });
   }
 
   // Update address fields
-  address.set(req.body);
+  address.set(updateData);
 
   await user.save();
 
@@ -182,16 +199,23 @@ exports.updateUserAddress = catchAsync(async (req, res, next) => {
 exports.deleteUserAddress = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user.id);
 
-  const address = user.addresses.id(req.params.addressId);
+  if (!user) {
+    return next(new AppError('User not found', 404));
+  }
+
+  const addressId = req.params.addressId.trim();
+  const address = user.addresses.id(addressId);
 
   if (!address) {
+    console.log(`Address ${addressId} not found for user ${user._id}`);
+    console.log('Available addresses:', user.addresses.map(a => a._id.toString()));
     return next(new AppError('Address not found', 404));
   }
 
   const wasDefault = address.isDefault;
 
-  // Remove address
-  address.remove();
+  // Remove address using pull
+  user.addresses.pull(addressId);
 
   // If default address was deleted and there are other addresses, set first as default
   if (wasDefault && user.addresses.length > 0) {
@@ -332,8 +356,8 @@ exports.getUserDashboardStats = catchAsync(async (req, res, next) => {
   ]);
 
   // Get wishlist count
-  const user = await User.findById(userId).populate('wishlist');
-  const wishlistCount = user.wishlist.items.length;
+  const user = await User.findById(userId);
+  const wishlistCount = user.wishlist ? user.wishlist.length : 0;
 
   // Get cart count
   const cart = await Cart.findById(user.cart).populate('items');

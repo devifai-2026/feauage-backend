@@ -107,12 +107,14 @@ const seedDatabase = async () => {
       isActive: true,
       gender: 'male',
       addresses: [{
-        type: 'home',
-        addressLine1: '123 Main Street',
+        name: 'John Doe',
+        addressType: 'home',
+        address: '123 Main Street',
         city: 'Mumbai',
         state: 'Maharashtra',
         pincode: '400001',
         country: 'India',
+        phone: '9876543210',
         isDefault: true
       }]
     });

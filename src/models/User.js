@@ -71,16 +71,26 @@ const userSchema = new mongoose.Schema({
     default: 'customer'
   },
   addresses: [{
-    type: {
+    name: {
       type: String,
-      enum: ['home', 'office', 'other'],
+      required: [true, 'Name is required'],
+      trim: true
+    },
+    addressType: {
+      type: String,
+      alias: 'type',
+      enum: ['home', 'work', 'other'],
       default: 'home'
     },
-    addressLine1: {
+    address: {
       type: String,
-      required: [true, 'Address line 1 is required']
+      alias: 'addressLine1',
+      required: [true, 'Address is required']
     },
-    addressLine2: String,
+    landmark: {
+      type: String,
+      alias: 'addressLine2'
+    },
     city: {
       type: String,
       required: [true, 'City is required']
@@ -101,8 +111,14 @@ const userSchema = new mongoose.Schema({
     },
     country: {
       type: String,
+      alias: 'country_name', // just in case
       default: 'India'
     },
+    phone: {
+      type: String,
+      required: [true, 'Phone number is required']
+    },
+    alternatePhone: String,
     isDefault: {
       type: Boolean,
       default: false
@@ -247,6 +263,15 @@ userSchema.methods.incLoginAttempts = function () {
 
   return this.updateOne(updates);
 };
+
+// Diagnostic hook to track address modifications
+userSchema.pre('save', function (next) {
+  if (this.isModified('addresses')) {
+    console.log(`[DEBUG] Addresses modified for user ${this._id}`);
+    console.log(`[DEBUG] Stack trace: ${new Error().stack.split('\n').slice(1, 5).join('\n')}`);
+  }
+  next();
+});
 
 const User = mongoose.model('User', userSchema);
 

@@ -22,8 +22,10 @@ router.use(protect);
 router.get('/addresses', getUserAddresses);
 router.post('/addresses', addUserAddress);
 router.patch('/addresses/:addressId', updateUserAddress);
+router.post('/addresses/:addressId', updateUserAddress);
 router.delete('/addresses/:addressId', deleteUserAddress);
 router.patch('/addresses/:addressId/set-default', setDefaultAddress);
+router.post('/addresses/:addressId/set-default', setDefaultAddress);
 
 // Order routes
 router.get('/orders', getUserOrders);

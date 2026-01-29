@@ -118,7 +118,7 @@ const {
 const { generatePresignedUrl } = require("../controllers/admin/s3Controller");
 
 const router = express.Router();
-
+router.get("/categories", getAllCategories);
 // All admin routes require authentication and admin role
 router.use(protect);
 router.use(restrictTo("admin", "superadmin"));
@@ -155,7 +155,7 @@ router.patch("/products/:id/stock", updateStock);
 router.route("/products/:id").get(getProduct).patch(updateProduct).delete(deleteProduct);
 
 // Category routes
-router.get("/categories", getAllCategories);
+
 router.get("/categories/tree", getCategoryTree);
 router.post("/categories", createCategory);
 router.route("/categories/:id").patch(updateCategory).delete(deleteCategory);

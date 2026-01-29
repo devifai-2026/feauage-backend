@@ -177,8 +177,7 @@ exports.logout = (req, res) => {
 exports.getMe = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user.id)
     .populate('cart')
-    .populate('wishlist')
-    .populate('addresses');
+    .populate('wishlist');
 
   res.status(200).json({
     status: 'success',

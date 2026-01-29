@@ -12,7 +12,7 @@ const analyticsSchema = new mongoose.Schema({
   },
   entityType: {
     type: String,
-    enum: ['Product', 'Category', 'User', null]
+    enum: ['Product', 'Category', 'User', 'Order', null]
   },
   user: {
     type: mongoose.Schema.Types.ObjectId,

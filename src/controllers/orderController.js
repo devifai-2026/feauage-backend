@@ -19,80 +19,51 @@ const { TAX_RATES, SHIPPING } = require('../constants');
 // @route   POST /api/v1/orders
 // @access  Private
 exports.createOrder = catchAsync(async (req, res, next) => {
-  const { shippingAddressId, billingAddressId, paymentMethod, couponCode } = req.body;
+  const { shippingAddressId, billingAddressId, paymentMethod, couponCode, shippingMethod } = req.body;
 
-  // IMPORTANT: Guest users cannot place orders
-  // They must be authenticated (registered and logged in)
-  if (!req.user || !req.user.id) {
-    return next(new AppError('You must be logged in to place an order. Guest users can add items to cart and wishlist, but must create an account to checkout.', 401));
+  // 1) Validation
+  if (!paymentMethod) {
+    return next(new AppError('Payment method is required', 400));
   }
 
-  // Get user with addresses
-  const user = await User.findById(req.user.id).populate('addresses');
+  // Check authentication
+  if (!req.user || !req.user.id) {
+    return next(new AppError('You must be logged in to place an order.', 401));
+  }
 
-  // Get cart with items
-  const cart = await Cart.findOne({ user: req.user.id })
-    .populate({
+  // Get user and cart
+  const [user, cart] = await Promise.all([
+    User.findById(req.user.id),
+    Cart.findOne({ user: req.user.id }).populate({
       path: 'items',
-      populate: {
-        path: 'product',
-        select: 'name sku sellingPrice offerPrice isOnOffer stockQuantity images'
-      }
-    })
-    .populate('couponApplied');
+      populate: { path: 'product' }
+    }).populate('couponApplied')
+  ]);
 
   if (!cart || cart.items.length === 0) {
-    return next(new AppError('Cart is empty', 400));
+    return next(new AppError('Your cart is empty', 400));
   }
 
-  // Check stock availability
-  const unavailableItems = [];
-  for (const item of cart.items) {
-    if (item.product.stockQuantity < item.quantity) {
-      unavailableItems.push({
-        productId: item.product._id,
-        productName: item.product.name,
-        requested: item.quantity,
-        available: item.product.stockQuantity
-      });
-    }
-  }
-
-  if (unavailableItems.length > 0) {
-    return res.status(400).json({
-      status: 'fail',
-      message: 'Some items are out of stock',
-      data: {
-        unavailableItems
-      }
-    });
-  }
-
-  // Get shipping address
+  // 2) Resolve Addresses
   let shippingAddress;
   if (shippingAddressId) {
-    shippingAddress = user.addresses.find(
-      addr => addr._id.toString() === shippingAddressId
-    );
+    shippingAddress = user.addresses.find(addr => addr._id.toString() === shippingAddressId);
   } else {
-    // Use default address
-    shippingAddress = user.addresses.find(addr => addr.isDefault);
+    shippingAddress = user.addresses.find(addr => addr.isDefault) || user.addresses[0];
   }
 
   if (!shippingAddress) {
-    return next(new AppError('Shipping address not found', 400));
+    return next(new AppError('Please select or provide a shipping address', 400));
   }
 
-  // Get billing address (use shipping if not provided)
   let billingAddress = shippingAddress;
   if (billingAddressId) {
-    billingAddress = user.addresses.find(
-      addr => addr._id.toString() === billingAddressId
-    ) || shippingAddress;
+    const foundBilling = user.addresses.find(addr => addr._id.toString() === billingAddressId);
+    if (foundBilling) billingAddress = foundBilling;
   }
 
-  // Calculate totals
-  await cart.calculateTotals();
+  // 3) Calculate totals and check stock
+  if (!cart.cartTotal) await cart.calculateTotals();
 
   // Apply coupon if provided
   let coupon = null;
@@ -143,61 +114,86 @@ exports.createOrder = catchAsync(async (req, res, next) => {
   // Create order items
   const orderItems = [];
   for (const cartItem of cart.items) {
-    const price = cartItem.product.isOnOffer ? cartItem.product.offerPrice : cartItem.product.sellingPrice;
+    const product = cartItem.product;
+    if (!product) {
+      return next(new AppError('One or more products in your cart are no longer available.', 400));
+    }
+
+    const price = product.isOnOffer ? product.offerPrice : product.sellingPrice;
 
     const orderItem = await OrderItem.create({
       order: order._id,
-      product: cartItem.product._id,
+      product: product._id,
       quantity: cartItem.quantity,
       price,
-      sku: cartItem.product.sku,
-      productName: cartItem.product.name,
-      productImage: cartItem.product.images[0]?.url
+      sku: product.sku,
+      productName: product.name,
+      productImage: product.images?.[0]?.url
     });
 
     orderItems.push(orderItem);
 
     // Reduce stock
-    await Product.updateStock(
-      cartItem.product._id,
-      cartItem.quantity,
-      'stock_out',
-      req.user.id,
-      order._id,
-      'Order placed',
-      `Order ${order.orderId}`
-    );
+    try {
+      await Product.updateStock(
+        product._id,
+        cartItem.quantity,
+        'stock_out',
+        req.user.id,
+        order._id,
+        'Order placed',
+        `Order ${order.orderId}`
+      );
+    } catch (err) {
+      return next(new AppError(err.message || 'Error updating stock', 400));
+    }
   }
 
   // Create order addresses
-  await OrderAddress.create([
-    {
-      order: order._id,
-      type: 'shipping',
-      name: shippingAddress.name || user.fullName,
-      phone: shippingAddress.phone || user.phone,
-      addressLine1: shippingAddress.addressLine1,
-      addressLine2: shippingAddress.addressLine2,
-      city: shippingAddress.city,
-      state: shippingAddress.state,
-      pincode: shippingAddress.pincode,
-      country: shippingAddress.country,
-      email: user.email
-    },
-    {
-      order: order._id,
-      type: 'billing',
-      name: billingAddress.name || user.fullName,
-      phone: billingAddress.phone || user.phone,
-      addressLine1: billingAddress.addressLine1,
-      addressLine2: billingAddress.addressLine2,
-      city: billingAddress.city,
-      state: billingAddress.state,
-      pincode: billingAddress.pincode,
-      country: billingAddress.country,
-      email: user.email
-    }
-  ]);
+  try {
+    const normalizePhone = (phone) => {
+      if (!phone) return '';
+      const cleaned = phone.toString().replace(/\D/g, '');
+      return cleaned.length > 10 ? cleaned.slice(-10) : cleaned;
+    };
+
+    const normalizePincode = (pincode) => {
+      if (!pincode) return '';
+      return pincode.toString().replace(/\D/g, '').slice(0, 6);
+    };
+
+    await OrderAddress.create([
+      {
+        order: order._id,
+        type: 'shipping',
+        name: shippingAddress.name || user.fullName,
+        phone: normalizePhone(shippingAddress.phone || user.phone),
+        addressLine1: shippingAddress.address,
+        landmark: shippingAddress.landmark,
+        city: shippingAddress.city,
+        state: shippingAddress.state,
+        pincode: normalizePincode(shippingAddress.pincode),
+        country: shippingAddress.country,
+        email: user.email
+      },
+      {
+        order: order._id,
+        type: 'billing',
+        name: billingAddress.name || user.fullName,
+        phone: normalizePhone(billingAddress.phone || user.phone),
+        addressLine1: billingAddress.address,
+        landmark: billingAddress.landmark,
+        city: billingAddress.city,
+        state: billingAddress.state,
+        pincode: normalizePincode(billingAddress.pincode),
+        country: billingAddress.country,
+        email: user.email
+      }
+    ]);
+  } catch (err) {
+    // If address creation fails, we should ideally rollback order but for now return clear error
+    return next(new AppError(`Address validation failed: ${err.message}`, 400));
+  }
 
   // Clear cart
   await cart.clearCart();
@@ -538,6 +534,11 @@ function calculateShippingCharge(pincode, orderValue) {
   // In production, integrate with Shiprocket or similar service
   if (orderValue >= 5000) {
     return 0; // Free shipping above ₹5000
+  }
+
+  // Handle missing pincode
+  if (!pincode || typeof pincode !== 'string') {
+    return 100; // Default standard charge
   }
 
   // Sample pincode-based calculation
