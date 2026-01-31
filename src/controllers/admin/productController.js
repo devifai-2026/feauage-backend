@@ -72,6 +72,11 @@ exports.createProduct = catchAsync(async (req, res, next) => {
     return next(new AppError('Category not found', 404));
   }
 
+  // Handle empty subcategory
+  if (req.body.subCategory === '') {
+    req.body.subCategory = undefined;
+  }
+
   // Check if subcategory exists
   if (req.body.subCategory) {
     const subCategory = await SubCategory.findById(req.body.subCategory);
@@ -90,7 +95,31 @@ exports.createProduct = catchAsync(async (req, res, next) => {
   // Set createdBy
   req.body.createdBy = req.user.id;
 
+  // Ensure mandatory fields are present in req.body for better error handling before Product.create
+  const requiredFields = ['name', 'description', 'category', 'basePrice', 'sellingPrice', 'stockQuantity', 'material'];
+  const missingFields = requiredFields.filter(field => !req.body[field] && req.body[field] !== 0);
+
+  if (missingFields.length > 0) {
+    return next(new AppError(`Missing required fields: ${missingFields.join(', ')}`, 400));
+  }
+
+  // Set defaults and handle enums if needed
+  if (!req.body.gender) req.body.gender = 'unisex';
+
   const product = await Product.create(req.body);
+
+  // Handle images if provided in the body
+  if (req.body.images && Array.isArray(req.body.images)) {
+    const imagePromises = req.body.images.map(img =>
+      ProductImage.create({
+        product: product._id,
+        url: img.url,
+        isPrimary: img.isPrimary || false,
+        uploadedBy: req.user.id
+      })
+    );
+    await Promise.all(imagePromises);
+  }
 
   // Log admin activity
   await AdminActivity.logActivity({
@@ -129,6 +158,11 @@ exports.updateProduct = catchAsync(async (req, res, next) => {
     }
   }
 
+  // Handle empty subcategory
+  if (req.body.subCategory === '') {
+    req.body.subCategory = undefined;
+  }
+
   // Check if subcategory exists if being updated
   if (req.body.subCategory) {
     const subCategory = await SubCategory.findById(req.body.subCategory);
@@ -140,15 +174,26 @@ exports.updateProduct = catchAsync(async (req, res, next) => {
   // Update updatedBy
   req.body.updatedBy = req.user.id;
 
-  // Update product
-  const product = await Product.findByIdAndUpdate(
-    req.params.id,
-    req.body,
-    {
-      new: true,
-      runValidators: true
-    }
-  );
+  // Update product properties
+  Object.assign(previousProduct, req.body);
+  const product = await previousProduct.save();
+
+  // Handle images update if provided
+  if (req.body.images && Array.isArray(req.body.images)) {
+    console.log('hitting', req.body.images)
+    // Basic implementation: replace all images
+    await ProductImage.deleteMany({ product: product._id });
+
+    const imagePromises = req.body.images.map(img =>
+      ProductImage.create({
+        product: product._id,
+        url: img.url,
+        isPrimary: img.isPrimary || false,
+        uploadedBy: req.user.id
+      })
+    );
+    await Promise.all(imagePromises);
+  }
 
   // Log admin activity
   await AdminActivity.logActivity({
