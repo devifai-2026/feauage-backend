@@ -9,6 +9,11 @@ const bannerImageSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  subheader: {
+    type: String,
+    default: '',
+    maxlength: [300, 'Subheader cannot exceed 300 characters']
+  },
   displayOrder: {
     type: Number,
     default: 0
@@ -17,7 +22,10 @@ const bannerImageSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   }
-}, { _id: true });
+}, {
+  _id: true,
+  minimize: false
+});
 
 const bannerSchema = new mongoose.Schema({
   name: {
@@ -58,6 +66,15 @@ const bannerSchema = new mongoose.Schema({
     }
   },
   redirectUrl: {
+    type: String,
+    trim: true
+  },
+  linkType: {
+    type: String,
+    enum: ['product', 'category', 'collection', 'url', 'none'],
+    default: 'none'
+  },
+  linkTarget: {
     type: String,
     trim: true
   },

@@ -70,7 +70,7 @@ const productSchema = new mongoose.Schema({
     default: 0,
     min: 0,
     validate: {
-      validator: function(v) {
+      validator: function (v) {
         if (this.discountType === 'percentage') {
           return v <= 100;
         }
@@ -232,7 +232,7 @@ productSchema.virtual('gemstones', {
 });
 
 // Virtual for discount percentage
-productSchema.virtual('discountPercentage').get(function() {
+productSchema.virtual('discountPercentage').get(function () {
   if (this.discountType === 'percentage') {
     return this.discountValue;
   } else if (this.discountType === 'fixed' && this.basePrice > 0) {
@@ -241,17 +241,20 @@ productSchema.virtual('discountPercentage').get(function() {
   return 0;
 });
 
-// Pre-save middleware
-productSchema.pre('save', function(next) {
+// Pre-validate middleware
+productSchema.pre('validate', function (next) {
   // Generate slug from name
-  if (this.isModified('name')) {
-    this.slug = slugify(this.name, {
-      lower: true,
-      strict: true,
-      trim: true
-    });
+  if (this.isModified('name') || !this.slug) {
+    const slugSource = this.name || '';
+    if (slugSource) {
+      this.slug = slugify(slugSource, {
+        lower: true,
+        strict: true,
+        trim: true
+      });
+    }
   }
-  
+
   // Calculate stock status
   if (this.stockQuantity <= 0) {
     this.stockStatus = 'out_of_stock';
@@ -260,7 +263,7 @@ productSchema.pre('save', function(next) {
   } else {
     this.stockStatus = 'in_stock';
   }
-  
+
   // Calculate offer price
   const now = new Date();
   if (this.isOnOffer && this.offerStartDate <= now && this.offerEndDate >= now) {
@@ -275,20 +278,20 @@ productSchema.pre('save', function(next) {
     this.offerPrice = this.sellingPrice;
     this.isOnOffer = false;
   }
-  
+
   next();
 });
 
 // Static method to update stock
-productSchema.statics.updateStock = async function(productId, quantity, type, userId, referenceId, reason, notes) {
+productSchema.statics.updateStock = async function (productId, quantity, type, userId, referenceId, reason, notes) {
   const product = await this.findById(productId);
   if (!product) {
     throw new Error('Product not found');
   }
-  
+
   const previousStock = product.stockQuantity;
   let newStock;
-  
+
   switch (type) {
     case 'stock_in':
       newStock = previousStock + quantity;
@@ -305,10 +308,10 @@ productSchema.statics.updateStock = async function(productId, quantity, type, us
     default:
       throw new Error('Invalid stock update type');
   }
-  
+
   product.stockQuantity = newStock;
   await product.save();
-  
+
   // Create stock history record
   const StockHistory = mongoose.model('StockHistory');
   await StockHistory.create({
@@ -324,7 +327,7 @@ productSchema.statics.updateStock = async function(productId, quantity, type, us
     performedBy: userId,
     notes
   });
-  
+
   return product;
 };
 
