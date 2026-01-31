@@ -127,7 +127,7 @@ exports.deleteBanner = catchAsync(async (req, res, next) => {
     return next(new AppError('Banner not found', 404));
   }
   
-  await banner.remove();
+  await banner.deleteOne();
   
   // Log admin activity
   await AdminActivity.logActivity({

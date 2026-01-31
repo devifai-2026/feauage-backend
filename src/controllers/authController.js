@@ -9,6 +9,7 @@ const Analytics = require('../models/Analytics');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const Email = require('../services/emailService');
+const mongoose = require('mongoose');
 
 const signToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -16,8 +17,13 @@ const signToken = (id) => {
   });
 };
 
-const createSendToken = (user, statusCode, res) => {
+const createSendToken = async (user, statusCode, res, guestId = null) => {
   const token = signToken(user._id);
+
+  // Merge guest data if guestId is provided
+  if (guestId) {
+    await mergeGuestData(user._id, guestId);
+  }
 
   // Remove password from output
   user.password = undefined;
@@ -29,6 +35,96 @@ const createSendToken = (user, statusCode, res) => {
       user
     }
   });
+};
+
+const mergeGuestData = async (userId, guestId) => {
+  try {
+    console.log(`Merging guest data for guestId: ${guestId} into userId: ${userId}`);
+    
+    // 1) Merge Cart
+    const guestCart = await Cart.findOne({ guestId }).populate('items');
+    if (guestCart && guestCart.items && guestCart.items.length > 0) {
+      let userCart = await Cart.findOne({ user: userId });
+      if (!userCart) {
+        userCart = await Cart.create({ user: userId });
+      }
+
+      const CartItem = mongoose.model('CartItem');
+      const userItemIdsStr = userCart.items.map(id => id.toString());
+      
+      for (const guestItem of guestCart.items) {
+        if (!guestItem || !guestItem.product) continue;
+        const productId = (guestItem.product._id || guestItem.product).toString();
+        
+        // Check if item already exists in user cart
+        const existingItem = await CartItem.findOne({
+          cart: userCart._id,
+          product: productId
+        });
+
+        if (existingItem) {
+          existingItem.quantity += guestItem.quantity;
+          await existingItem.save();
+          await CartItem.deleteOne({ _id: guestItem._id });
+        } else {
+          await CartItem.findByIdAndUpdate(guestItem._id, { cart: userCart._id });
+          if (!userItemIdsStr.includes(guestItem._id.toString())) {
+            userCart.items.push(guestItem._id);
+            userItemIdsStr.push(guestItem._id.toString());
+          }
+        }
+      }
+      
+      await userCart.save();
+      await userCart.calculateTotals();
+      await Cart.findByIdAndDelete(guestCart._id);
+    }
+
+    // 2) Merge Wishlist
+    const guestWishlist = await Wishlist.findOne({ guestId }).populate('items');
+    if (guestWishlist && guestWishlist.items && guestWishlist.items.length > 0) {
+      let userWishlist = await Wishlist.findOne({ user: userId });
+      if (!userWishlist) {
+        userWishlist = await Wishlist.create({ user: userId });
+      }
+
+      const WishlistItem = mongoose.model('WishlistItem');
+      const userItemIdsStr = userWishlist.items.map(id => id.toString());
+
+      for (const guestItem of guestWishlist.items) {
+        if (!guestItem || !guestItem.product) continue;
+        const productId = (guestItem.product._id || guestItem.product).toString();
+        
+        const existingItem = await WishlistItem.findOne({
+          wishlist: userWishlist._id,
+          product: productId
+        });
+
+        if (existingItem) {
+          await WishlistItem.deleteOne({ _id: guestItem._id });
+        } else {
+          await WishlistItem.findByIdAndUpdate(guestItem._id, { wishlist: userWishlist._id });
+          if (!userItemIdsStr.includes(guestItem._id.toString())) {
+            userWishlist.items.push(guestItem._id);
+            userItemIdsStr.push(guestItem._id.toString());
+          }
+        }
+      }
+      await userWishlist.save();
+      await Wishlist.findByIdAndDelete(guestWishlist._id);
+    }
+
+    // 3) Update analytics and guest user record
+    await GuestUser.findOneAndUpdate(
+      { guestId }, 
+      { convertedToUser: true, convertedUserId: userId, convertedAt: new Date() }
+    );
+    await Analytics.updateMany({ guestId }, { user: userId });
+    
+    console.log(`Successfully merged guest data for ${guestId}`);
+  } catch (error) {
+    console.error('Error merging guest data:', error);
+  }
 };
 
 // @desc    Register user
@@ -66,15 +162,7 @@ exports.register = catchAsync(async (req, res, next) => {
   // Convert guest user to registered user if guestId provided
   const guestId = req.headers['x-guest-id'] || req.cookies?.guestId || req.body.guestId;
   if (guestId) {
-    try {
-      const guestUser = await GuestUser.findOne({ guestId, isActive: true });
-      if (guestUser) {
-        await guestUser.convertToUser(newUser._id);
-        await Analytics.updateMany({ guestId }, { $set: { user: newUser._id }, $unset: { guestUser: 1 } });
-      }
-    } catch (error) {
-      // Silent fail - don't block registration if guest conversion fails
-    }
+    await mergeGuestData(newUser._id, guestId);
   }
 
   // Generate verification token
@@ -158,7 +246,8 @@ exports.login = catchAsync(async (req, res, next) => {
   });
 
   // 7) If everything ok, send token to client
-  createSendToken(user, 200, res);
+  const guestId = req.headers['x-guest-id'] || req.body.guestId;
+  await createSendToken(user, 200, res, guestId);
 });
 
 // @desc    Logout user
@@ -300,7 +389,7 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
   await user.save();
 
   // 4) Log the user in, send JWT
-  createSendToken(user, 200, res);
+  await createSendToken(user, 200, res);
 });
 
 // @desc    Verify email

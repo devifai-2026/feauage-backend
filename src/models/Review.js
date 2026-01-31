@@ -97,17 +97,14 @@ reviewSchema.virtual('helpfulPercentage').get(function() {
 });
 
 // Pre-save middleware to update product ratings
-reviewSchema.pre('save', async function(next) {
-  if (this.isNew || this.isModified('rating') || this.isModified('isApproved')) {
-    await this.constructor.updateProductRatings(this.product);
-  }
-  next();
+// Post-save middleware to update product ratings
+reviewSchema.post('save', async function() {
+  await this.constructor.updateProductRatings(this.product);
 });
 
-// Pre-remove middleware to update product ratings
-reviewSchema.pre('remove', async function(next) {
+// Post-deleteOne middleware to update product ratings
+reviewSchema.post('deleteOne', { document: true, query: false }, async function() {
   await this.constructor.updateProductRatings(this.product);
-  next();
 });
 
 // Static method to update product ratings
@@ -115,11 +112,10 @@ reviewSchema.statics.updateProductRatings = async function(productId) {
   const Review = mongoose.model('Review');
   const Product = mongoose.model('Product');
   
-  const stats = await Review.aggregate([
+  const stats = await this.aggregate([
     {
       $match: {
-        product: productId,
-        isApproved: true
+        product: new mongoose.Types.ObjectId(productId)
       }
     },
     {

@@ -455,7 +455,7 @@ exports.deleteProductImage = catchAsync(async (req, res, next) => {
     return next(new AppError('Cannot delete the only image', 400));
   }
 
-  await image.remove();
+  await image.deleteOne();
 
   // If deleted image was primary, set another as primary
   if (image.isPrimary) {

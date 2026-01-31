@@ -10,12 +10,12 @@ const {
   getCartCount,
   checkCartStock
 } = require('../controllers/cartController');
-const { protect } = require('../middleware/auth');
+const { identify } = require('../middleware/auth');
 
 const router = express.Router();
 
-// All routes require authentication
-router.use(protect);
+// Allow both authenticated users and guests
+router.use(identify);
 
 router.get('/', getCart);
 router.get('/count', getCartCount);

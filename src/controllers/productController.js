@@ -54,7 +54,6 @@ exports.getProduct = catchAsync(async (req, res, next) => {
     .populate('gemstones')
     .populate({
       path: 'reviews',
-      match: { isApproved: true },
       options: { sort: { createdAt: -1 } },
       populate: {
         path: 'user',
@@ -64,6 +63,15 @@ exports.getProduct = catchAsync(async (req, res, next) => {
   
   if (!product || !product.isActive) {
     return next(new AppError('Product not found', 404));
+  }
+
+  // Self-healing: Update ratings if they are out of sync
+  if (product.reviews && product.ratingCount !== product.reviews.length) {
+    await Review.updateProductRatings(product._id);
+    // Reload the product object to get updated stats
+    const updatedStats = await Product.findById(product._id).select('ratingAverage ratingCount');
+    product.ratingAverage = updatedStats.ratingAverage;
+    product.ratingCount = updatedStats.ratingCount;
   }
   
   // Increment view count
@@ -213,8 +221,7 @@ exports.deleteProduct = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getProductReviews = catchAsync(async (req, res, next) => {
   const reviews = await Review.find({ 
-    product: req.params.id,
-    isApproved: true 
+    product: req.params.id
   })
     .populate('user', 'firstName lastName profileImage')
     .sort('-createdAt');

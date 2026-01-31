@@ -445,7 +445,7 @@ exports.deleteSubCategory = catchAsync(async (req, res, next) => {
     return next(new AppError('Cannot delete subcategory with products', 400));
   }
   
-  await subCategory.remove();
+  await subCategory.deleteOne();
   
   res.status(204).json({
     status: 'success',
