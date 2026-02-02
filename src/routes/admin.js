@@ -59,6 +59,16 @@ const {
   getOrderTimeline,
   generateInvoice,
   sendInvoiceEmail,
+  // Shiprocket integration
+  createShipment,
+  getAvailableCouriers,
+  generateAWB,
+  schedulePickup,
+  trackShipment,
+  cancelShipment,
+  printShippingLabel,
+  getShippingChargesEstimate,
+  generateManifest,
 } = require("../controllers/admin/orderController");
 
 const {
@@ -185,6 +195,18 @@ router.post("/orders/:id/send-invoice", sendInvoiceEmail); // Added
 router.patch("/orders/:id/status", updateOrderStatus);
 router.patch("/orders/:id/shipping-status", updateShippingStatus);
 router.patch("/orders/:id/payment-status", updatePaymentStatus);
+
+// Shiprocket integration routes
+router.post("/orders/:id/create-shipment", createShipment);
+router.get("/orders/:id/available-couriers", getAvailableCouriers);
+router.post("/orders/:id/generate-awb", generateAWB);
+router.post("/orders/:id/schedule-pickup", schedulePickup);
+router.get("/orders/:id/track-shipment", trackShipment);
+router.post("/orders/:id/cancel-shipment", cancelShipment);
+router.get("/orders/:id/shipping-label", printShippingLabel);
+router.post("/orders/:id/shipping-charges", getShippingChargesEstimate);
+router.post("/orders/generate-manifest", generateManifest);
+
 // Coupon routes
 router.get("/coupons", getAllCoupons);
 router.post("/coupons/validate", validateCoupon);

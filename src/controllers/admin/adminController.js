@@ -1679,6 +1679,21 @@ exports.updateUserStatus = catchAsync(async (req, res, next) => {
     return next(new AppError('You cannot deactivate your own account', 400));
   }
 
+  // Check for ongoing orders when deactivating user
+  if (!isActive) {
+    const ongoingOrdersCount = await Order.countDocuments({
+      user: req.params.id,
+      status: { $nin: ['delivered', 'cancelled', 'returned', 'refunded'] }
+    });
+
+    if (ongoingOrdersCount > 0) {
+      return next(new AppError(
+        `Cannot deactivate user. User has ${ongoingOrdersCount} ongoing order(s). Please complete or cancel these orders first.`,
+        400
+      ));
+    }
+  }
+
   user.isActive = isActive;
   await user.save();
 
@@ -1724,6 +1739,19 @@ exports.deleteUser = catchAsync(async (req, res, next) => {
   // Prevent deleting admin accounts unless you're a superadmin
   if (user.role === 'admin' && req.user.role !== 'superadmin') {
     return next(new AppError('Only superadmins can delete admin accounts', 403));
+  }
+
+  // Check for ongoing orders before deleting user
+  const ongoingOrdersCount = await Order.countDocuments({
+    user: req.params.id,
+    status: { $nin: ['delivered', 'cancelled', 'returned', 'refunded'] }
+  });
+
+  if (ongoingOrdersCount > 0) {
+    return next(new AppError(
+      `Cannot delete user. User has ${ongoingOrdersCount} ongoing order(s). Please complete or cancel these orders first.`,
+      400
+    ));
   }
 
   // Log the activity before deletion
