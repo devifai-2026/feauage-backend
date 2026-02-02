@@ -36,7 +36,10 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     User.findById(req.user.id),
     Cart.findOne({ user: req.user.id }).populate({
       path: 'items',
-      populate: { path: 'product' }
+      populate: {
+        path: 'product',
+        populate: { path: 'images' }
+      }
     }).populate('couponApplied')
   ]);
 
@@ -275,7 +278,14 @@ exports.getUserOrders = catchAsync(async (req, res, next) => {
     .paginate();
 
   const orders = await features.query
-    .populate('items')
+    .populate({
+      path: 'items',
+      populate: {
+        path: 'product',
+        select: 'name images',
+        populate: { path: 'images' }
+      }
+    })
     .populate('addresses')
     .sort('-createdAt');
 
@@ -299,12 +309,15 @@ exports.getUserOrders = catchAsync(async (req, res, next) => {
 // @access  Private
 exports.getOrder = catchAsync(async (req, res, next) => {
   const order = await Order.findById(req.params.id)
-    .populate('items')
-    .populate('addresses')
     .populate({
-      path: 'items.product',
-      select: 'name slug images'
-    });
+      path: 'items',
+      populate: {
+        path: 'product',
+        select: 'name slug images',
+        populate: { path: 'images' }
+      }
+    })
+    .populate('addresses');
 
   if (!order) {
     return next(new AppError('Order not found', 404));

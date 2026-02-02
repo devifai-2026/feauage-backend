@@ -39,7 +39,8 @@ exports.getAllOrders = catchAsync(async (req, res, next) => {
       path: 'items',
       populate: {
         path: 'product',
-        select: 'name sku images price'
+        select: 'name sku images price',
+        populate: { path: 'images' }
       }
     })
     .populate('addresses');
@@ -78,7 +79,8 @@ exports.getOrder = catchAsync(async (req, res, next) => {
       path: 'items',
       populate: {
         path: 'product',
-        select: 'name sku images'
+        select: 'name sku images',
+        populate: { path: 'images' }
       }
     })
     .populate('addresses');
@@ -393,7 +395,7 @@ exports.createManualOrder = catchAsync(async (req, res, next) => {
   const orderItems = [];
   
   for (const item of items) {
-    const product = await Product.findById(item.product);
+    const product = await Product.findById(item.product).populate('images');
     if (!product) {
       return next(new AppError(`Product ${item.product} not found`, 404));
     }
@@ -448,7 +450,8 @@ exports.createManualOrder = catchAsync(async (req, res, next) => {
       quantity: item.quantity,
       price: item.price,
       sku: item.sku,
-      productName: item.name
+      productName: item.name,
+      productImage: product.images?.[0]?.url
     });
     
     // Reduce stock
