@@ -4,10 +4,14 @@ const OrderAddress = require('../../models/OrderAddress');
 const User = require('../../models/User');
 const Product = require('../../models/Product');
 const AdminActivity = require('../../models/AdminActivity');
+const ShippingService = require('../../services/shippingService');
 const { emitOrderNotification } = require('../../sockets/orderSocket');
 const catchAsync = require('../../utils/catchAsync');
 const AppError = require('../../utils/appError');
 const APIFeatures = require('../../utils/apiFeatures');
+
+// Initialize shipping service
+const shippingService = new ShippingService();
 
 // @desc    Get all orders (admin view)
 // @route   GET /api/v1/admin/orders
@@ -1089,11 +1093,521 @@ function calculateShippingCharge(pincode, orderValue) {
   if (orderValue >= 5000) {
     return 0;
   }
-  
+
   const metroPincodes = ['400001', '110001', '600001', '700001', '500001', '560001'];
   if (metroPincodes.includes(pincode.substring(0, 6))) {
     return 50;
   }
-  
+
   return 100;
 }
+
+// =====================================================
+// SHIPROCKET INTEGRATION ENDPOINTS
+// =====================================================
+
+// @desc    Create Shiprocket shipment for order
+// @route   POST /api/v1/admin/orders/:id/create-shipment
+// @access  Private/Admin
+exports.createShipment = catchAsync(async (req, res, next) => {
+  const order = await Order.findById(req.params.id)
+    .populate('user', 'firstName lastName email phone')
+    .populate('addresses');
+
+  if (!order) {
+    return next(new AppError('Order not found', 404));
+  }
+
+  // Check if shipment already exists
+  if (order.shiprocketOrderId) {
+    return next(new AppError('Shipment already created for this order', 400));
+  }
+
+  // Get order items
+  const orderItems = await OrderItem.find({ order: order._id });
+
+  if (!orderItems.length) {
+    return next(new AppError('No items found in order', 400));
+  }
+
+  // Get shipping address
+  const shippingAddress = order.addresses.find(addr => addr.type === 'shipping');
+
+  if (!shippingAddress) {
+    return next(new AppError('Shipping address not found', 400));
+  }
+
+  // Prepare order data for Shiprocket
+  const shipmentData = ShippingService.createOrderData(order, orderItems, shippingAddress);
+
+  // Override with any custom data from request body
+  if (req.body.length) shipmentData.length = req.body.length;
+  if (req.body.breadth) shipmentData.breadth = req.body.breadth;
+  if (req.body.height) shipmentData.height = req.body.height;
+  if (req.body.weight) shipmentData.weight = req.body.weight;
+
+  try {
+    // Create shipment in Shiprocket
+    const shiprocketResponse = await shippingService.createShipment(shipmentData);
+
+    // Update order with Shiprocket details
+    order.shiprocketOrderId = shiprocketResponse.order_id;
+    order.shiprocketShipmentId = shiprocketResponse.shipment_id;
+    order.shippingStatus = 'confirmed';
+    order.status = 'processing';
+    await order.save();
+
+    // Log admin activity
+    await AdminActivity.logActivity({
+      adminUser: req.user.id,
+      action: 'create_shipment',
+      entityType: 'Order',
+      entityId: order._id,
+      metadata: {
+        orderId: order.orderId,
+        shiprocketOrderId: shiprocketResponse.order_id,
+        shiprocketShipmentId: shiprocketResponse.shipment_id
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Shipment created successfully',
+      data: {
+        shiprocketOrderId: shiprocketResponse.order_id,
+        shiprocketShipmentId: shiprocketResponse.shipment_id,
+        order
+      }
+    });
+  } catch (error) {
+    console.error('Shiprocket API error:', error.response?.data || error.message);
+    return next(new AppError(
+      error.response?.data?.message || 'Failed to create shipment in Shiprocket',
+      500
+    ));
+  }
+});
+
+// @desc    Get available couriers for order
+// @route   GET /api/v1/admin/orders/:id/available-couriers
+// @access  Private/Admin
+exports.getAvailableCouriers = catchAsync(async (req, res, next) => {
+  const order = await Order.findById(req.params.id).populate('addresses');
+
+  if (!order) {
+    return next(new AppError('Order not found', 404));
+  }
+
+  const shippingAddress = order.addresses.find(addr => addr.type === 'shipping');
+
+  if (!shippingAddress) {
+    return next(new AppError('Shipping address not found', 400));
+  }
+
+  // Get weight from request or use default
+  const weight = req.query.weight || 0.5;
+
+  // Pickup pincode (your warehouse/store pincode)
+  const pickupPincode = process.env.PICKUP_PINCODE || '400001';
+
+  try {
+    const couriers = await shippingService.getAvailableCouriers(
+      pickupPincode,
+      shippingAddress.pincode,
+      weight
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        couriers: couriers.data?.available_courier_companies || [],
+        recommendedCourierId: couriers.data?.recommended_courier_company_id
+      }
+    });
+  } catch (error) {
+    console.error('Shiprocket courier check error:', error.response?.data || error.message);
+    return next(new AppError(
+      error.response?.data?.message || 'Failed to fetch available couriers',
+      500
+    ));
+  }
+});
+
+// @desc    Generate AWB for shipment
+// @route   POST /api/v1/admin/orders/:id/generate-awb
+// @access  Private/Admin
+exports.generateAWB = catchAsync(async (req, res, next) => {
+  const { courierId } = req.body;
+
+  const order = await Order.findById(req.params.id);
+
+  if (!order) {
+    return next(new AppError('Order not found', 404));
+  }
+
+  if (!order.shiprocketShipmentId) {
+    return next(new AppError('Shipment not created yet. Create shipment first.', 400));
+  }
+
+  if (order.shiprocketAWB) {
+    return next(new AppError('AWB already generated for this order', 400));
+  }
+
+  if (!courierId) {
+    return next(new AppError('Courier ID is required', 400));
+  }
+
+  try {
+    const awbResponse = await shippingService.generateAWB(order.shiprocketShipmentId, courierId);
+
+    // Update order with AWB details
+    order.shiprocketAWB = awbResponse.response?.data?.awb_code;
+    order.trackingNumber = awbResponse.response?.data?.awb_code;
+    order.courierName = awbResponse.response?.data?.courier_name;
+    order.shippingStatus = 'processing';
+    await order.save();
+
+    // Log admin activity
+    await AdminActivity.logActivity({
+      adminUser: req.user.id,
+      action: 'generate_awb',
+      entityType: 'Order',
+      entityId: order._id,
+      metadata: {
+        orderId: order.orderId,
+        awb: awbResponse.response?.data?.awb_code,
+        courier: awbResponse.response?.data?.courier_name
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'AWB generated successfully',
+      data: {
+        awb: awbResponse.response?.data?.awb_code,
+        courierName: awbResponse.response?.data?.courier_name,
+        order
+      }
+    });
+  } catch (error) {
+    console.error('Shiprocket AWB error:', error.response?.data || error.message);
+    return next(new AppError(
+      error.response?.data?.message || 'Failed to generate AWB',
+      500
+    ));
+  }
+});
+
+// @desc    Schedule pickup for shipment
+// @route   POST /api/v1/admin/orders/:id/schedule-pickup
+// @access  Private/Admin
+exports.schedulePickup = catchAsync(async (req, res, next) => {
+  const order = await Order.findById(req.params.id);
+
+  if (!order) {
+    return next(new AppError('Order not found', 404));
+  }
+
+  if (!order.shiprocketShipmentId) {
+    return next(new AppError('Shipment not created yet', 400));
+  }
+
+  if (!order.shiprocketAWB) {
+    return next(new AppError('AWB not generated yet. Generate AWB first.', 400));
+  }
+
+  try {
+    const pickupResponse = await shippingService.schedulePickup([order.shiprocketShipmentId]);
+
+    // Update order shipping status
+    order.shippingStatus = 'processing';
+    order.pickupScheduled = true;
+    order.pickupToken = pickupResponse.response?.pickup_token_number;
+    await order.save();
+
+    // Log admin activity
+    await AdminActivity.logActivity({
+      adminUser: req.user.id,
+      action: 'schedule_pickup',
+      entityType: 'Order',
+      entityId: order._id,
+      metadata: {
+        orderId: order.orderId,
+        pickupToken: pickupResponse.response?.pickup_token_number
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Pickup scheduled successfully',
+      data: {
+        pickupToken: pickupResponse.response?.pickup_token_number,
+        pickupScheduledDate: pickupResponse.response?.pickup_scheduled_date,
+        order
+      }
+    });
+  } catch (error) {
+    console.error('Shiprocket pickup error:', error.response?.data || error.message);
+    return next(new AppError(
+      error.response?.data?.message || 'Failed to schedule pickup',
+      500
+    ));
+  }
+});
+
+// @desc    Track shipment
+// @route   GET /api/v1/admin/orders/:id/track-shipment
+// @access  Private/Admin
+exports.trackShipment = catchAsync(async (req, res, next) => {
+  const order = await Order.findById(req.params.id);
+
+  if (!order) {
+    return next(new AppError('Order not found', 404));
+  }
+
+  if (!order.shiprocketAWB && !order.shiprocketShipmentId) {
+    return next(new AppError('No tracking information available for this order', 400));
+  }
+
+  try {
+    let trackingData;
+
+    if (order.shiprocketAWB) {
+      trackingData = await shippingService.trackShipment(order.shiprocketAWB);
+    } else {
+      trackingData = await shippingService.trackByShipmentId(order.shiprocketShipmentId);
+    }
+
+    // Update order status based on tracking
+    if (trackingData.tracking_data) {
+      const currentStatus = trackingData.tracking_data.shipment_status;
+
+      // Map Shiprocket status to our status
+      const statusMap = {
+        '1': 'pending',      // AWB Assigned
+        '2': 'processing',   // Pickup Scheduled
+        '3': 'processing',   // Pickup Queued
+        '4': 'processing',   // Pickup Completed
+        '5': 'shipped',      // In Transit
+        '6': 'shipped',      // Out For Delivery
+        '7': 'delivered',    // Delivered
+        '8': 'cancelled',    // Cancelled
+        '9': 'returned',     // RTO Initiated
+        '10': 'returned'     // RTO Delivered
+      };
+
+      const mappedStatus = statusMap[currentStatus] || order.shippingStatus;
+
+      if (order.shippingStatus !== mappedStatus) {
+        order.shippingStatus = mappedStatus;
+        if (mappedStatus === 'delivered') {
+          order.status = 'delivered';
+          order.deliveredAt = new Date();
+        }
+        await order.save();
+      }
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        tracking: trackingData.tracking_data,
+        activities: trackingData.tracking_data?.shipment_track_activities || [],
+        currentStatus: order.shippingStatus,
+        order: {
+          orderId: order.orderId,
+          awb: order.shiprocketAWB,
+          courier: order.courierName,
+          estimatedDelivery: order.estimatedDelivery
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Shiprocket tracking error:', error.response?.data || error.message);
+    return next(new AppError(
+      error.response?.data?.message || 'Failed to fetch tracking information',
+      500
+    ));
+  }
+});
+
+// @desc    Cancel shipment
+// @route   POST /api/v1/admin/orders/:id/cancel-shipment
+// @access  Private/Admin
+exports.cancelShipment = catchAsync(async (req, res, next) => {
+  const { reason } = req.body;
+
+  const order = await Order.findById(req.params.id);
+
+  if (!order) {
+    return next(new AppError('Order not found', 404));
+  }
+
+  if (!order.shiprocketShipmentId) {
+    return next(new AppError('No shipment found for this order', 400));
+  }
+
+  // Check if shipment can be cancelled (not delivered)
+  if (['delivered', 'returned'].includes(order.shippingStatus)) {
+    return next(new AppError('Cannot cancel delivered or returned shipment', 400));
+  }
+
+  try {
+    await shippingService.cancelShipment(order.shiprocketShipmentId);
+
+    // Update order
+    order.shippingStatus = 'cancelled';
+    order.shipmentCancellationReason = reason;
+    await order.save();
+
+    // Log admin activity
+    await AdminActivity.logActivity({
+      adminUser: req.user.id,
+      action: 'cancel_shipment',
+      entityType: 'Order',
+      entityId: order._id,
+      metadata: {
+        orderId: order.orderId,
+        shiprocketShipmentId: order.shiprocketShipmentId,
+        reason
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Shipment cancelled successfully',
+      data: { order }
+    });
+  } catch (error) {
+    console.error('Shiprocket cancellation error:', error.response?.data || error.message);
+    return next(new AppError(
+      error.response?.data?.message || 'Failed to cancel shipment',
+      500
+    ));
+  }
+});
+
+// @desc    Print shipping label
+// @route   GET /api/v1/admin/orders/:id/shipping-label
+// @access  Private/Admin
+exports.printShippingLabel = catchAsync(async (req, res, next) => {
+  const order = await Order.findById(req.params.id);
+
+  if (!order) {
+    return next(new AppError('Order not found', 404));
+  }
+
+  if (!order.shiprocketShipmentId) {
+    return next(new AppError('No shipment found for this order', 400));
+  }
+
+  try {
+    const labelResponse = await shippingService.printLabel([order.shiprocketShipmentId]);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        labelUrl: labelResponse.label_url,
+        labels: labelResponse.response?.labels
+      }
+    });
+  } catch (error) {
+    console.error('Shiprocket label error:', error.response?.data || error.message);
+    return next(new AppError(
+      error.response?.data?.message || 'Failed to generate shipping label',
+      500
+    ));
+  }
+});
+
+// @desc    Get shipping charges estimate
+// @route   POST /api/v1/admin/orders/:id/shipping-charges
+// @access  Private/Admin
+exports.getShippingChargesEstimate = catchAsync(async (req, res, next) => {
+  const { weight, length, breadth, height } = req.body;
+
+  const order = await Order.findById(req.params.id).populate('addresses');
+
+  if (!order) {
+    return next(new AppError('Order not found', 404));
+  }
+
+  const shippingAddress = order.addresses.find(addr => addr.type === 'shipping');
+
+  if (!shippingAddress) {
+    return next(new AppError('Shipping address not found', 400));
+  }
+
+  const pickupPincode = process.env.PICKUP_PINCODE || '400001';
+
+  try {
+    const chargesResponse = await shippingService.getShippingCharges(
+      pickupPincode,
+      shippingAddress.pincode,
+      weight || 0.5,
+      { length: length || 10, breadth: breadth || 10, height: height || 10 }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        charges: chargesResponse.data?.available_courier_companies || [],
+        recommended: chargesResponse.data?.recommended_courier_company_id
+      }
+    });
+  } catch (error) {
+    console.error('Shiprocket charges error:', error.response?.data || error.message);
+    return next(new AppError(
+      error.response?.data?.message || 'Failed to calculate shipping charges',
+      500
+    ));
+  }
+});
+
+// @desc    Generate manifest for multiple orders
+// @route   POST /api/v1/admin/orders/generate-manifest
+// @access  Private/Admin
+exports.generateManifest = catchAsync(async (req, res, next) => {
+  const { orderIds } = req.body;
+
+  if (!orderIds || !orderIds.length) {
+    return next(new AppError('No orders selected', 400));
+  }
+
+  // Get shipment IDs for all orders
+  const orders = await Order.find({ _id: { $in: orderIds } });
+
+  const shipmentIds = orders
+    .filter(order => order.shiprocketShipmentId)
+    .map(order => order.shiprocketShipmentId);
+
+  if (!shipmentIds.length) {
+    return next(new AppError('No shipments found for selected orders', 400));
+  }
+
+  try {
+    const manifestResponse = await shippingService.generateManifest(shipmentIds);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        manifestUrl: manifestResponse.manifest_url,
+        manifestDetails: manifestResponse
+      }
+    });
+  } catch (error) {
+    console.error('Shiprocket manifest error:', error.response?.data || error.message);
+    return next(new AppError(
+      error.response?.data?.message || 'Failed to generate manifest',
+      500
+    ));
+  }
+});

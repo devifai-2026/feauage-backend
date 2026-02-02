@@ -8,12 +8,16 @@ const Coupon = require('../models/Coupon');
 const User = require('../models/User');
 const StockHistory = require('../models/StockHistory');
 const Analytics = require('../models/Analytics');
+const ShippingService = require('../services/shippingService');
 const { emitOrderNotification } = require('../sockets/orderSocket');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const APIFeatures = require('../utils/apiFeatures');
 const razorpay = require('../configs/razorpay');
 const { TAX_RATES, SHIPPING } = require('../constants');
+
+// Initialize shipping service for tracking
+const shippingService = new ShippingService();
 
 // @desc    Create order from cart
 // @route   POST /api/v1/orders
@@ -401,50 +405,159 @@ exports.trackOrder = catchAsync(async (req, res, next) => {
     return next(new AppError('Not authorized to track this order', 403));
   }
 
-  // Get tracking information (simplified - integrate with Shiprocket API)
+  // Initialize tracking info with basic order data
   const trackingInfo = {
     orderId: order.orderId,
     status: order.status,
     shippingStatus: order.shippingStatus,
-    trackingNumber: order.trackingNumber,
+    trackingNumber: order.trackingNumber || order.shiprocketAWB,
+    courierName: order.courierName,
+    trackingUrl: order.trackingUrl,
     estimatedDelivery: order.estimatedDelivery,
-    shippedAt: order.shippedAt,
     deliveredAt: order.deliveredAt,
-    updates: []
+    updates: [],
+    shiprocketTracking: null
   };
 
-  // Add status updates
+  // Add basic status updates timeline
   if (order.createdAt) {
     trackingInfo.updates.push({
       status: 'Order Placed',
       date: order.createdAt,
-      description: 'Your order has been placed successfully'
+      description: 'Your order has been placed successfully',
+      icon: 'shopping_cart'
     });
   }
 
-  if (order.status === 'confirmed') {
+  if (['confirmed', 'processing', 'shipped', 'delivered'].includes(order.status)) {
     trackingInfo.updates.push({
       status: 'Order Confirmed',
       date: order.updatedAt,
-      description: 'Your order has been confirmed'
+      description: 'Your order has been confirmed and is being processed',
+      icon: 'check_circle'
     });
   }
 
-  if (order.shippingStatus === 'shipped') {
+  if (order.shiprocketOrderId) {
     trackingInfo.updates.push({
-      status: 'Shipped',
+      status: 'Shipment Created',
       date: order.updatedAt,
-      description: `Your order has been shipped. Tracking number: ${order.trackingNumber}`
+      description: 'Your order is ready for shipping',
+      icon: 'inventory'
     });
   }
 
-  if (order.shippingStatus === 'delivered') {
+  if (order.pickupScheduled) {
+    trackingInfo.updates.push({
+      status: 'Pickup Scheduled',
+      date: order.updatedAt,
+      description: 'Courier pickup has been scheduled',
+      icon: 'local_shipping'
+    });
+  }
+
+  // Fetch real-time tracking from Shiprocket if AWB is available
+  if (order.shiprocketAWB) {
+    try {
+      const shiprocketData = await shippingService.trackShipment(order.shiprocketAWB);
+
+      if (shiprocketData && shiprocketData.tracking_data) {
+        trackingInfo.shiprocketTracking = {
+          currentStatus: shiprocketData.tracking_data.shipment_status_id,
+          currentStatusText: getShiprocketStatusText(shiprocketData.tracking_data.shipment_status),
+          edd: shiprocketData.tracking_data.edd,
+          etd: shiprocketData.tracking_data.etd,
+          activities: (shiprocketData.tracking_data.shipment_track_activities || []).map(activity => ({
+            status: activity.activity,
+            location: activity.location,
+            date: activity.date,
+            time: activity['sr-status-label']
+          }))
+        };
+
+        // Update order status based on Shiprocket tracking
+        const shiprocketStatus = shiprocketData.tracking_data.shipment_status;
+        const statusMap = {
+          '1': { shipping: 'pending', order: order.status },         // AWB Assigned
+          '2': { shipping: 'processing', order: 'processing' },      // Pickup Scheduled
+          '3': { shipping: 'processing', order: 'processing' },      // Pickup Queued
+          '4': { shipping: 'processing', order: 'processing' },      // Pickup Completed
+          '5': { shipping: 'shipped', order: 'shipped' },            // In Transit
+          '6': { shipping: 'out_for_delivery', order: 'shipped' },   // Out For Delivery
+          '7': { shipping: 'delivered', order: 'delivered' },        // Delivered
+          '8': { shipping: 'cancelled', order: order.status },       // Cancelled
+          '9': { shipping: 'returned', order: 'returned' },          // RTO Initiated
+          '10': { shipping: 'returned', order: 'returned' }          // RTO Delivered
+        };
+
+        const mappedStatus = statusMap[shiprocketStatus];
+        if (mappedStatus && order.shippingStatus !== mappedStatus.shipping) {
+          order.shippingStatus = mappedStatus.shipping;
+          if (mappedStatus.order !== order.status) {
+            order.status = mappedStatus.order;
+          }
+          if (mappedStatus.shipping === 'delivered') {
+            order.deliveredAt = new Date();
+          }
+          await order.save();
+
+          // Update tracking info with latest data
+          trackingInfo.status = order.status;
+          trackingInfo.shippingStatus = order.shippingStatus;
+          trackingInfo.deliveredAt = order.deliveredAt;
+        }
+
+        // Add Shiprocket activities to updates
+        if (shiprocketData.tracking_data.shipment_track_activities) {
+          shiprocketData.tracking_data.shipment_track_activities.forEach(activity => {
+            trackingInfo.updates.push({
+              status: activity['sr-status-label'] || activity.activity,
+              date: activity.date,
+              description: `${activity.activity}${activity.location ? ` at ${activity.location}` : ''}`,
+              icon: 'local_shipping',
+              fromShiprocket: true
+            });
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Shiprocket tracking fetch error:', error.message);
+      // Continue with basic tracking info if Shiprocket fails
+    }
+  } else {
+    // No Shiprocket AWB - add manual status updates
+    if (['shipped', 'out_for_delivery', 'delivered'].includes(order.shippingStatus)) {
+      trackingInfo.updates.push({
+        status: 'Shipped',
+        date: order.updatedAt,
+        description: order.trackingNumber
+          ? `Your order has been shipped. Tracking: ${order.trackingNumber}`
+          : 'Your order has been shipped',
+        icon: 'local_shipping'
+      });
+    }
+
+    if (order.shippingStatus === 'out_for_delivery') {
+      trackingInfo.updates.push({
+        status: 'Out for Delivery',
+        date: order.updatedAt,
+        description: 'Your order is out for delivery',
+        icon: 'directions_bike'
+      });
+    }
+  }
+
+  if (order.shippingStatus === 'delivered' || order.status === 'delivered') {
     trackingInfo.updates.push({
       status: 'Delivered',
-      date: order.deliveredAt,
-      description: 'Your order has been delivered'
+      date: order.deliveredAt || order.updatedAt,
+      description: 'Your order has been delivered successfully',
+      icon: 'check_circle'
     });
   }
+
+  // Sort updates by date (newest first for display, but return oldest first for timeline)
+  trackingInfo.updates.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   res.status(200).json({
     status: 'success',
@@ -453,6 +566,33 @@ exports.trackOrder = catchAsync(async (req, res, next) => {
     }
   });
 });
+
+// Helper function to get human-readable Shiprocket status
+function getShiprocketStatusText(statusCode) {
+  const statusTexts = {
+    '1': 'AWB Assigned',
+    '2': 'Pickup Scheduled',
+    '3': 'Pickup Queued',
+    '4': 'Pickup Completed',
+    '5': 'In Transit',
+    '6': 'Out for Delivery',
+    '7': 'Delivered',
+    '8': 'Cancelled',
+    '9': 'RTO Initiated',
+    '10': 'RTO Delivered',
+    '11': 'Pending',
+    '12': 'Lost',
+    '13': 'Pickup Error',
+    '14': 'RTO Acknowledged',
+    '15': 'Pickup Rescheduled',
+    '16': 'Cancellation Requested',
+    '17': 'Out for Pickup',
+    '18': 'In Transit Undelivered',
+    '19': 'RTO In Transit',
+    '20': 'Misrouted'
+  };
+  return statusTexts[statusCode] || 'Unknown Status';
+}
 
 // @desc    Get order invoice
 // @route   GET /api/v1/orders/:id/invoice

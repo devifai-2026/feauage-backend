@@ -318,7 +318,159 @@ async function handleRefundCreated(payload) {
 
 async function handleRefundProcessed(payload) {
   const { refund } = payload;
-  
+
   // Log refund processed
   console.log('Refund processed:', refund.id);
 }
+
+// =====================================================
+// SHIPROCKET WEBHOOK HANDLER
+// =====================================================
+
+// @desc    Handle Shiprocket webhook events
+// @route   POST /api/v1/webhooks/shiprocket
+// @access  Public (called by Shiprocket)
+exports.handleShiprocketWebhook = catchAsync(async (req, res, next) => {
+  const webhookToken = req.headers['x-api-key'] || req.query.token;
+
+  // Verify webhook token (optional but recommended)
+  if (process.env.SHIPROCKET_WEBHOOK_SECRET && webhookToken !== process.env.SHIPROCKET_WEBHOOK_SECRET) {
+    console.warn('Shiprocket webhook: Invalid token');
+    // Still process but log warning - Shiprocket doesn't always send consistent auth
+  }
+
+  const payload = req.body;
+
+  // Log webhook
+  await Webhook.create({
+    type: 'shiprocket',
+    event: payload.current_status || 'unknown',
+    payload
+  });
+
+  // Extract relevant data
+  const {
+    awb,
+    order_id: shiprocketOrderId,
+    current_status: currentStatus,
+    current_status_id: statusId,
+    shipment_id: shipmentId,
+    etd,
+    scans
+  } = payload;
+
+  // Find order by Shiprocket details
+  let order = null;
+
+  if (awb) {
+    order = await Order.findOne({ shiprocketAWB: awb });
+  }
+
+  if (!order && shiprocketOrderId) {
+    order = await Order.findOne({ shiprocketOrderId: shiprocketOrderId.toString() });
+  }
+
+  if (!order && shipmentId) {
+    order = await Order.findOne({ shiprocketShipmentId: shipmentId.toString() });
+  }
+
+  if (!order) {
+    console.log('Shiprocket webhook: Order not found for AWB/OrderId:', awb, shiprocketOrderId);
+    // Return success anyway to prevent retries
+    return res.status(200).json({ status: 'success', message: 'Order not found, webhook acknowledged' });
+  }
+
+  // Map Shiprocket status to our shipping status
+  const statusMap = {
+    '1': 'confirmed',        // AWB Assigned
+    '2': 'processing',       // Label Generated
+    '3': 'processing',       // Pickup Scheduled / Generated
+    '4': 'processing',       // Pickup Queued
+    '5': 'processing',       // Manifest Generated
+    '6': 'shipped',          // Shipped / In Transit
+    '7': 'shipped',          // Out For Delivery
+    '8': 'delivered',        // Delivered
+    '9': 'cancelled',        // Undelivered
+    '10': 'returned',        // RTO Initiated
+    '11': 'returned',        // RTO Delivered
+    '12': 'cancelled',       // Cancelled
+    '13': 'returned',        // RTO Acknowledged
+    '14': 'shipped',         // Out For Pickup
+    '15': 'processing',      // Pickup Exception
+    '16': 'shipped',         // In Transit (Delayed)
+    '17': 'shipped',         // Partial Delivered
+    '18': 'returned',        // Lost
+    '19': 'returned',        // Damaged
+    '20': 'returned',        // Destroyed
+    '38': 'shipped',         // Reached at Destination
+    '39': 'shipped',         // Misrouted
+    '40': 'shipped',         // Contact Customer Care
+    '41': 'shipped',         // Shipment Booked
+    '42': 'shipped'          // In Transit to Destination
+  };
+
+  const previousShippingStatus = order.shippingStatus;
+  const newShippingStatus = statusMap[statusId] || order.shippingStatus;
+
+  // Update order
+  order.shippingStatus = newShippingStatus;
+
+  // Update tracking number if not set
+  if (awb && !order.trackingNumber) {
+    order.trackingNumber = awb;
+  }
+
+  // Update estimated delivery if provided
+  if (etd) {
+    order.estimatedDelivery = new Date(etd);
+  }
+
+  // Handle delivery
+  if (newShippingStatus === 'delivered') {
+    order.status = 'delivered';
+    order.deliveredAt = new Date();
+
+    // Emit delivery notification
+    emitOrderNotification('order_delivered', {
+      orderId: order.orderId,
+      userId: order.user,
+      awb
+    });
+  }
+
+  // Handle cancellation/RTO
+  if (['cancelled', 'returned'].includes(newShippingStatus)) {
+    if (newShippingStatus === 'returned') {
+      order.status = 'returned';
+    }
+
+    // Emit notification
+    emitOrderNotification('shipping_issue', {
+      orderId: order.orderId,
+      userId: order.user,
+      status: currentStatus,
+      awb
+    });
+  }
+
+  await order.save();
+
+  // Emit general shipping update notification
+  if (previousShippingStatus !== newShippingStatus) {
+    emitOrderNotification('shipping_status_updated', {
+      orderId: order.orderId,
+      previousStatus: previousShippingStatus,
+      newStatus: newShippingStatus,
+      currentStatus,
+      awb,
+      userId: order.user
+    });
+  }
+
+  console.log(`Shiprocket webhook processed: Order ${order.orderId}, Status: ${currentStatus} (${statusId})`);
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Webhook processed successfully'
+  });
+});

@@ -5,6 +5,8 @@ const ProductImage = require('../../models/ProductImage');
 const ProductGemstone = require('../../models/ProductGemstone');
 const StockHistory = require('../../models/StockHistory');
 const AdminActivity = require('../../models/AdminActivity');
+const Order = require('../../models/Order');
+const OrderItem = require('../../models/OrderItem');
 const catchAsync = require('../../utils/catchAsync');
 const AppError = require('../../utils/appError');
 const APIFeatures = require('../../utils/apiFeatures');
@@ -224,6 +226,25 @@ exports.deleteProduct = catchAsync(async (req, res, next) => {
 
   if (!product) {
     return next(new AppError('Product not found', 404));
+  }
+
+  // Check if product is part of any ongoing orders
+  const orderItemsWithProduct = await OrderItem.find({ product: req.params.id }).select('order');
+
+  if (orderItemsWithProduct.length > 0) {
+    const orderIds = orderItemsWithProduct.map(item => item.order);
+
+    const ongoingOrdersCount = await Order.countDocuments({
+      _id: { $in: orderIds },
+      status: { $nin: ['delivered', 'cancelled', 'returned', 'refunded'] }
+    });
+
+    if (ongoingOrdersCount > 0) {
+      return next(new AppError(
+        `Cannot delete product. This product is part of ${ongoingOrdersCount} ongoing order(s). Please complete or cancel these orders first.`,
+        400
+      ));
+    }
   }
 
   // Soft delete - set isActive to false

@@ -64,12 +64,22 @@ const orderSchema = new mongoose.Schema({
   },
   shiprocketOrderId: String,
   shiprocketShipmentId: String,
+  shiprocketAWB: String,
   trackingNumber: String,
+  trackingUrl: String,
+  courierName: String,
+  courierCompanyId: Number,
+  pickupScheduled: {
+    type: Boolean,
+    default: false
+  },
+  pickupToken: String,
   shippingStatus: {
     type: String,
     enum: ['pending', 'confirmed', 'processing', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'returned'],
     default: 'pending'
   },
+  shipmentCancellationReason: String,
   estimatedDelivery: Date,
   deliveredAt: Date,
   // Order Status
