@@ -99,7 +99,7 @@ exports.getProduct = catchAsync(async (req, res, next) => {
     isActive: true
   })
   .limit(4)
-  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage')
+  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({
@@ -349,7 +349,7 @@ exports.getFeaturedProducts = catchAsync(async (req, res, next) => {
     isFeatured: true
   })
   .limit(10)
-  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage')
+  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({
@@ -370,7 +370,7 @@ exports.getNewArrivals = catchAsync(async (req, res, next) => {
     isNewArrival: true
   })
   .limit(10)
-  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage')
+  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({
@@ -391,7 +391,7 @@ exports.getBestSellers = catchAsync(async (req, res, next) => {
     isBestSeller: true
   })
   .limit(10)
-  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage purchaseCount')
+  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage purchaseCount stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({
@@ -414,7 +414,7 @@ exports.getProductsOnSale = catchAsync(async (req, res, next) => {
     offerEndDate: { $gte: new Date() }
   })
   .limit(10)
-  .select('name slug sellingPrice offerPrice discountValue discountType images')
+  .select('name slug sellingPrice offerPrice discountValue discountType images stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({
@@ -500,7 +500,7 @@ exports.getSimilarProducts = catchAsync(async (req, res, next) => {
     isActive: true
   })
   .limit(8)
-  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage')
+  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({

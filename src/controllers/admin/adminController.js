@@ -582,6 +582,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
         .sort('-createdAt')
         .limit(5)
         .populate('user', 'firstName lastName email')
+        .populate('items')
         .select('orderId user grandTotal status createdAt');
     } catch (error) {
       console.error('Error fetching recent orders:', error);
@@ -731,7 +732,8 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
           email: order.user?.email || 'N/A',
           amount: order.grandTotal,
           status: order.status,
-          date: order.createdAt
+          date: order.createdAt,
+          itemsCount: order.items?.reduce((acc, item) => acc + item.quantity, 0) || 0
         })),
 
         // User growth progress data
