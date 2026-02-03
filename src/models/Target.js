@@ -24,7 +24,7 @@ const targetSchema = new mongoose.Schema({
   },
   period: {
     type: String,
-    enum: ['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'custom'],
+    enum: ['daily', 'weekly', 'monthly', 'quarterly', 'half-yearly', 'yearly', 'annually', 'custom'],
     default: 'monthly',
     required: [true, 'Period is required']
   },
@@ -144,7 +144,11 @@ targetSchema.virtual('periodLabel').get(function() {
     case 'quarterly':
       const quarter = Math.floor(start.getMonth() / 3) + 1;
       return `Q${quarter} ${start.getFullYear()}`;
+    case 'half-yearly':
+      const half = start.getMonth() < 6 ? 1 : 2;
+      return `H${half} ${start.getFullYear()}`;
     case 'yearly':
+    case 'annually':
       return `Year ${start.getFullYear()}`;
     case 'custom':
       return `${start.toLocaleDateString()} - ${end.toLocaleDateString()}`;
