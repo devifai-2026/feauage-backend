@@ -129,10 +129,24 @@ exports.addUserAddress = catchAsync(async (req, res, next) => {
 
   // Map defaults for required fields if missing from the request
   const addressData = {
-    ...req.body,
     name: req.body.name || `${user.firstName} ${user.lastName}`,
-    phone: req.body.phone || user.phone
+    phone: req.body.phone || user.phone,
+    address: req.body.address || req.body.addressLine1,
+    city: req.body.city,
+    state: req.body.state,
+    pincode: req.body.pincode || req.body.zipCode,
+    country: req.body.country || 'India',
+    addressType: req.body.addressType || req.body.type || 'home',
+    landmark: req.body.landmark || req.body.addressLine2,
+    isDefault: req.body.isDefault || false
   };
+
+  // Validate required fields explicitly before pushing
+  const required = ['name', 'phone', 'address', 'city', 'state', 'pincode'];
+  const missing = required.filter(f => !addressData[f]);
+  if (missing.length > 0) {
+    return next(new AppError(`Missing required fields: ${missing.join(', ')}`, 400));
+  }
 
   // If this is the first address or user wants to set as default, set isDefault to true
   if (user.addresses.length === 0 || addressData.isDefault) {
@@ -158,37 +172,60 @@ exports.addUserAddress = catchAsync(async (req, res, next) => {
 // @route   PATCH /api/v1/users/addresses/:addressId
 // @access  Private
 exports.updateUserAddress = catchAsync(async (req, res, next) => {
-  const user = await User.findById(req.user.id);
+  const { addressId } = req.params;
 
-  if (!user) {
-    return next(new AppError('User not found', 404));
+  // Map frontend field names to backend field names
+  const updateData = {
+    name: req.body.name,
+    phone: req.body.phone,
+    address: req.body.address || req.body.addressLine1,
+    landmark: req.body.landmark || req.body.addressLine2,
+    city: req.body.city,
+    state: req.body.state,
+    pincode: req.body.pincode || req.body.zipCode,
+    country: req.body.country || 'India',
+    addressType: req.body.addressType || req.body.type || 'home',
+    isDefault: req.body.isDefault || false
+  };
+
+  // Remove undefined values
+  Object.keys(updateData).forEach(key => {
+    if (updateData[key] === undefined) {
+      delete updateData[key];
+    }
+  });
+
+  // Build the update query
+  const updateQuery = {};
+  Object.keys(updateData).forEach(key => {
+    updateQuery[`addresses.$.${key}`] = updateData[key];
+  });
+
+  // If setting as default, first reset all addresses to non-default
+  if (updateData.isDefault) {
+    await User.updateOne(
+      { _id: req.user.id },
+      { $set: { 'addresses.$[].isDefault': false } }
+    );
   }
 
-  const address = user.addresses.id(req.params.addressId);
+  // Update the specific address using positional operator
+  const result = await User.findOneAndUpdate(
+    { _id: req.user.id, 'addresses._id': addressId },
+    { $set: updateQuery },
+    { new: true, runValidators: false }
+  );
 
-  if (!address) {
+  if (!result) {
     return next(new AppError('Address not found', 404));
   }
 
-  // Mongoose aliases will handle mapping of fields like addressLine1, type, etc.
-  const updateData = { ...req.body };
-
-  // If setting as default, reset all other addresses
-  if (updateData.isDefault) {
-    user.addresses.forEach(addr => {
-      addr.isDefault = false;
-    });
-  }
-
-  // Update address fields
-  address.set(updateData);
-
-  await user.save();
+  const updatedAddress = result.addresses.id(addressId);
 
   res.status(200).json({
     status: 'success',
     data: {
-      address
+      address: updatedAddress
     }
   });
 });
@@ -296,13 +333,28 @@ exports.getUserOrders = catchAsync(async (req, res, next) => {
 // @route   GET /api/v1/users/reviews
 // @access  Private
 exports.getUserReviews = catchAsync(async (req, res, next) => {
-  const reviews = await Review.find({ user: req.user.id })
+  const features = new APIFeatures(
+    Review.find({ user: req.user.id }),
+    req.query
+  )
+    .filter()
+    .sort()
+    .limitFields()
+    .paginate();
+
+  const reviews = await features.query
     .populate('product', 'name images')
     .sort('-createdAt');
+
+  const total = await Review.countDocuments({
+    user: req.user.id,
+    ...features.filterQuery
+  });
 
   res.status(200).json({
     status: 'success',
     results: reviews.length,
+    total,
     data: {
       reviews
     }

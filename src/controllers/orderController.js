@@ -40,7 +40,14 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     User.findById(req.user.id),
     Cart.findOne({ user: req.user.id }).populate({
       path: 'items',
-      populate: { path: 'product' }
+      populate: {
+        path: 'product',
+        populate: {
+          path: 'images',
+          select: 'url isPrimary displayOrder',
+          options: { sort: { isPrimary: -1, displayOrder: 1 }, limit: 1 }
+        }
+      }
     }).populate('couponApplied')
   ]);
 
@@ -100,6 +107,25 @@ exports.createOrder = catchAsync(async (req, res, next) => {
 
   // Calculate grand total
   const grandTotal = cart.cartTotal - discountAmount + shippingCharge + tax;
+
+  // PRE-CHECK: Validate Stock Availability before creating order
+  // This prevents "Zombie Orders" where order is created but stock deduction fails
+  for (const cartItem of cart.items) {
+    const product = cartItem.product;
+    if (!product) {
+      return next(new AppError('One or more products in your cart are no longer available.', 400));
+    }
+
+    // Refresh product to get latest stock
+    const freshProduct = await Product.findById(product._id);
+    if (!freshProduct) {
+      return next(new AppError(`Product ${product.name} is no longer available`, 400));
+    }
+
+    if (freshProduct.stockQuantity < cartItem.quantity) {
+      return next(new AppError(`Insufficient stock for ${freshProduct.name}. Available: ${freshProduct.stockQuantity}`, 400));
+    }
+  }
 
   // Create order
   const order = await Order.create({
@@ -248,6 +274,15 @@ exports.createOrder = catchAsync(async (req, res, next) => {
       await order.save();
     } catch (error) {
       // Continue without Razorpay order - order is still created
+      console.error('Razorpay order creation failed:', error);
+    }
+  } else {
+    // For COD, create Shiprocket shipment immediately
+    try {
+      await shippingService.processShipmentForOrder(order._id);
+    } catch (error) {
+      console.error('COD Shipment creation failed:', error.message);
+      // Don't fail the order creation, but log the error
     }
   }
 
@@ -279,7 +314,18 @@ exports.getUserOrders = catchAsync(async (req, res, next) => {
     .paginate();
 
   const orders = await features.query
-    .populate('items')
+    .populate({
+      path: 'items',
+      populate: {
+        path: 'product',
+        select: 'name slug',
+        populate: {
+          path: 'images',
+          select: 'url isPrimary displayOrder',
+          options: { sort: { isPrimary: -1, displayOrder: 1 }, limit: 1 }
+        }
+      }
+    })
     .populate('addresses')
     .sort('-createdAt');
 
@@ -303,12 +349,19 @@ exports.getUserOrders = catchAsync(async (req, res, next) => {
 // @access  Private
 exports.getOrder = catchAsync(async (req, res, next) => {
   const order = await Order.findById(req.params.id)
-    .populate('items')
-    .populate('addresses')
     .populate({
-      path: 'items.product',
-      select: 'name slug images'
-    });
+      path: 'items',
+      populate: {
+        path: 'product',
+        select: 'name slug',
+        populate: {
+          path: 'images',
+          select: 'url isPrimary displayOrder',
+          options: { sort: { isPrimary: -1, displayOrder: 1 }, limit: 1 }
+        }
+      }
+    })
+    .populate('addresses');
 
   if (!order) {
     return next(new AppError('Order not found', 404));
@@ -367,6 +420,21 @@ exports.cancelOrder = catchAsync(async (req, res, next) => {
       'Order cancellation',
       `Order ${order.orderId} cancelled`
     );
+  }
+
+  // Cancel Shiprocket shipment if exists
+  if (order.shiprocketOrderId) {
+    try {
+      // If we have a shipment ID, use that, otherwise we might need to use order ID (but cancelShipment usually takes shipment ID or AWB)
+      // The shippingService.cancelShipment takes shipmentId.
+      if (order.shiprocketAWB) {
+        await shippingService.cancelShipment(order.shiprocketAWB); // Verify if cancelShipment takes AWB or Shipment ID. Service says shipmentId
+      } else if (order.shiprocketShipmentId) {
+        await shippingService.cancelShipment(order.shiprocketShipmentId);
+      }
+    } catch (error) {
+      console.error('Shiprocket cancellation failed:', error.message);
+    }
   }
 
   res.status(200).json({
@@ -666,6 +734,53 @@ exports.createPaymentOrder = catchAsync(async (req, res, next) => {
     console.error('Razorpay order creation failed:', error);
     return next(new AppError('Payment gateway error', 500));
   }
+});
+
+// @desc    Get recent order activity (public)
+// @route   GET /api/v1/orders/recent-activity
+// @access  Public
+exports.getRecentActivity = catchAsync(async (req, res, next) => {
+  const orders = await Order.find({ status: { $ne: 'cancelled' } })
+    .select('user createdAt')
+    .sort('-createdAt')
+    .limit(10)
+    .populate({
+      path: 'user',
+      select: 'firstName lastName'
+    })
+    .populate({
+      path: 'items',
+      populate: {
+        path: 'product',
+        select: 'name images'
+      }
+    })
+    .populate({
+      path: 'addresses',
+      match: { type: 'shipping' },
+      select: 'city state'
+    });
+
+  const activity = orders.map(order => {
+    // Check if items and addresses exist (they are arrays because of virtuals)
+    const item = order.items && order.items.length > 0 ? order.items[0] : null;
+    const address = order.addresses && order.addresses.length > 0 ? order.addresses[0] : null;
+
+    if (!order.user || !item || !item.product) return null;
+
+    return {
+      user: `${order.user.firstName} ${order.user.lastName ? order.user.lastName.charAt(0) + '.' : ''}`,
+      city: address ? address.city : 'India',
+      product: item.product.name,
+      image: item.product.images && item.product.images.length > 0 ? item.product.images[0].url : null,
+      time: order.createdAt
+    };
+  }).filter(Boolean);
+
+  res.status(200).json({
+    status: 'success',
+    data: activity
+  });
 });
 
 // Helper function to calculate shipping charge

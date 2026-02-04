@@ -6,11 +6,15 @@ const {
   cancelOrder,
   trackOrder,
   getOrderInvoice,
-  createPaymentOrder
+  createPaymentOrder,
+  getRecentActivity
 } = require('../controllers/orderController');
 const { protect } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Public routes
+router.get('/recent-activity', getRecentActivity);
 
 // All routes require authentication
 router.use(protect);

@@ -24,6 +24,7 @@ const targetRoutes = require('./routes/targetRoutes');
 const adminUserRoutes = require('./routes/adminUsers');
 const guestRoutes = require('./routes/guest');
 const bannerRoutes = require('./routes/banners');
+const paymentRoutes = require('./routes/payments');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -112,6 +113,7 @@ app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/targets', targetRoutes);
 app.use('/api/v1/guest', guestRoutes);
 app.use('/api/v1/banners', bannerRoutes);
+app.use('/api/v1/payments', paymentRoutes);
 
 // Health check endpoint
 app.get('/api/v1/health', (req, res) => {

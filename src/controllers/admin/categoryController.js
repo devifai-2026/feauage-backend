@@ -14,13 +14,25 @@ exports.getAllCategories = catchAsync(async (req, res, next) => {
   const categories = await Category.find()
     .populate('parentCategory', 'name')
     .populate('createdBy', 'firstName lastName')
-    .sort('displayOrder');
-  
+    .sort('displayOrder')
+    .lean();
+
+  // Add product count to each category
+  const categoriesWithCount = await Promise.all(
+    categories.map(async (category) => {
+      const productCount = await Product.countDocuments({ category: category._id });
+      return {
+        ...category,
+        productCount
+      };
+    })
+  );
+
   res.status(200).json({
     status: 'success',
-    results: categories.length,
+    results: categoriesWithCount.length,
     data: {
-      categories
+      categories: categoriesWithCount
     }
   });
 });
@@ -30,37 +42,59 @@ exports.getAllCategories = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 exports.getCategoryTree = catchAsync(async (req, res, next) => {
   // Get all active categories (main categories)
-  const categories = await Category.find({ 
-    isActive: true 
+  const categories = await Category.find({
+    isActive: true
   })
   .sort('displayOrder')
   .lean();
-  
+
   // Get all active subcategories from SubCategory model
-  const SubCategory = mongoose.model('SubCategory');
-  const allSubcategories = await SubCategory.find({ 
-    isActive: true 
+  const SubCategoryModel = mongoose.model('SubCategory');
+  const allSubcategories = await SubCategoryModel.find({
+    isActive: true
   })
   .sort('displayOrder')
   .lean();
-  
-  // Build tree structure
+
+  // Get product counts for all categories
+  const categoryProductCounts = await Product.aggregate([
+    { $match: { category: { $in: categories.map(c => c._id) } } },
+    { $group: { _id: '$category', count: { $sum: 1 } } }
+  ]);
+  const categoryCountMap = {};
+  categoryProductCounts.forEach(item => {
+    categoryCountMap[item._id.toString()] = item.count;
+  });
+
+  // Get product counts for all subcategories
+  const subCategoryProductCounts = await Product.aggregate([
+    { $match: { subCategory: { $in: allSubcategories.map(s => s._id) } } },
+    { $group: { _id: '$subCategory', count: { $sum: 1 } } }
+  ]);
+  const subCategoryCountMap = {};
+  subCategoryProductCounts.forEach(item => {
+    subCategoryCountMap[item._id.toString()] = item.count;
+  });
+
+  // Build tree structure with product counts
   const categoryTree = categories.map(category => {
     // Filter subcategories that belong to this category
     const subcategories = allSubcategories.filter(
-      sub => sub.category && 
+      sub => sub.category &&
              sub.category.toString() === category._id.toString()
     );
-    
+
     return {
       ...category,
+      productCount: categoryCountMap[category._id.toString()] || 0,
       children: subcategories.map(sub => ({
         ...sub,
-        children: [] // Subcategories don't have further children
+        productCount: subCategoryCountMap[sub._id.toString()] || 0,
+        children: []
       }))
     };
   });
-  
+
   res.status(200).json({
     status: 'success',
     results: categoryTree.length,
