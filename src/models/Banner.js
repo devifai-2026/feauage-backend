@@ -119,10 +119,16 @@ const bannerSchema = new mongoose.Schema({
     validate: {
       validator: function (v) {
         if (!v) return true;
-        return /^[A-Z0-9]{4,20}$/.test(v);
+        return /^[A-Z0-9 ]{4,20}$/.test(v);
       },
       message: 'Promo code must be 4-20 characters (letters and numbers only)'
     }
+  },
+  discountPercentage: {
+    type: Number,
+    min: [0, 'Discount cannot be negative'],
+    max: [100, 'Discount cannot exceed 100%'],
+    default: 0
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,

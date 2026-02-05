@@ -962,6 +962,8 @@ exports.generateInvoice = catchAsync(async (req, res, next) => {
       total: item.price * item.quantity
     })),
     subtotal: order.subtotal,
+    discount: order.discount,
+    promoCode: order.promoCode,
     shippingCharge: order.shippingCharge,
     tax: order.tax,
     grandTotal: order.grandTotal,

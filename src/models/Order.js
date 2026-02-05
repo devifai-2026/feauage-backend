@@ -93,6 +93,7 @@ const orderSchema = new mongoose.Schema({
   // Invoice
   invoiceNumber: String,
   invoiceUrl: String,
+  promoCode: String,
   // Audit
   createdAt: {
     type: Date,

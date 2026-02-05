@@ -8,6 +8,7 @@ const Coupon = require('../models/Coupon');
 const User = require('../models/User');
 const StockHistory = require('../models/StockHistory');
 const Analytics = require('../models/Analytics');
+const PromoCode = require('../models/PromoCode');
 const ShippingService = require('../services/shippingService');
 const { emitOrderNotification } = require('../sockets/orderSocket');
 const catchAsync = require('../utils/catchAsync');
@@ -23,7 +24,7 @@ const shippingService = new ShippingService();
 // @route   POST /api/v1/orders
 // @access  Private
 exports.createOrder = catchAsync(async (req, res, next) => {
-  const { shippingAddressId, billingAddressId, paymentMethod, couponCode, shippingMethod } = req.body;
+  const { shippingAddressId, billingAddressId, paymentMethod, couponCode, promoCode, shippingMethod } = req.body;
 
   // 1) Validation
   if (!paymentMethod) {
@@ -98,6 +99,16 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     }
   }
 
+  // Apply new PromoCode if provided
+  let appliedPromoCodeStr = null;
+  if (promoCode) {
+    const promo = await PromoCode.findOne({ code: promoCode.toUpperCase(), isActive: true });
+    if (promo) {
+      discountAmount = (cart.cartTotal * promo.discountPercentage) / 100;
+      appliedPromoCodeStr = promo.code;
+    }
+  }
+
   // Calculate shipping charge (simplified - you might want to integrate with shipping API)
   const shippingCharge = calculateShippingCharge(shippingAddress.pincode, cart.cartTotal);
 
@@ -138,7 +149,8 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     currency: 'INR',
     paymentMethod,
     paymentStatus: paymentMethod === 'cod' ? 'pending' : 'pending',
-    status: 'pending'
+    status: 'pending',
+    promoCode: appliedPromoCodeStr
   });
 
   // Create order items

@@ -5,9 +5,9 @@
 
 // Tax Configuration
 const TAX_RATES = {
-    GST: 0.18, // 18% GST for India
-    CGST: 0.09, // 9% CGST
-    SGST: 0.09, // 9% SGST
+    GST: 0.03, // 3% GST for Jewelry in India
+    CGST: 0.015, // 1.5% CGST
+    SGST: 0.015, // 1.5% SGST
 };
 
 // Shipping Configuration

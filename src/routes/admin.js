@@ -125,6 +125,14 @@ const {
   deleteReview: deleteAdminReview,
 } = require("../controllers/admin/reviewController");
 
+const {
+  getAllPromoCodes,
+  createPromoCode,
+  updatePromoCode,
+  deletePromoCode,
+  getActivePromoCodes,
+} = require("../controllers/admin/promoCodeController");
+
 const { protect, restrictTo, isAdmin } = require("../middleware/auth");
 const {
   uploadProductImages: uploadProductImagesMiddleware,
@@ -270,8 +278,16 @@ router.get("/profile/activity", getActivityLog);
 router.post("/s3/presigned-url", generatePresignedUrl);
 
 // Review management
+// Review management
 router.get("/reviews", getAllReviews);
 router.patch("/reviews/:id/status", updateReviewStatus);
 router.delete("/reviews/:id", deleteAdminReview);
+
+// Promo code routes
+router.get("/promo-codes", getAllPromoCodes);
+router.post("/promo-codes", createPromoCode);
+router.patch("/promo-codes/:id", updatePromoCode);
+router.delete("/promo-codes/:id", deletePromoCode);
+router.get("/public/promo-codes", getActivePromoCodes); // Public exposed via admin router but actually used by client if needed, or I'll move it.
 
 module.exports = router;

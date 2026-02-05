@@ -1,4 +1,5 @@
 const Banner = require('../../models/Banner');
+const PromoCode = require('../../models/PromoCode');
 const AdminActivity = require('../../models/AdminActivity');
 const catchAsync = require('../../utils/catchAsync');
 const AppError = require('../../utils/appError');
@@ -57,6 +58,31 @@ exports.createBanner = catchAsync(async (req, res, next) => {
   req.body.createdBy = req.user.id;
 
   const banner = await Banner.create(req.body);
+  
+  // Automatically create/update promo code if provided
+  if (req.body.promoCode) {
+    const promoCodeStr = req.body.promoCode.toUpperCase().trim();
+    
+    // Check if this promo code is already used by another banner/promo
+    const existingPromo = await PromoCode.findOne({ code: promoCodeStr });
+    if (existingPromo && existingPromo.referenceId?.toString() !== banner._id.toString()) {
+      // If we already have this code but it belongs to someone else
+      return next(new AppError('This promo code is already in use by another banner or promotion.', 400));
+    }
+
+    await PromoCode.findOneAndUpdate(
+      { referenceId: banner._id }, // Link by banner ID
+      {
+        code: promoCodeStr,
+        discountPercentage: Number(req.body.discountPercentage) || 0,
+        isActive: true,
+        isSecret: false,
+        createdBy: req.user.id,
+        referenceId: banner._id
+      },
+      { upsert: true, new: true, runValidators: true }
+    );
+  }
 
   // Log admin activity
   await AdminActivity.logActivity({
@@ -99,6 +125,30 @@ exports.updateBanner = catchAsync(async (req, res, next) => {
 
   await banner.save();
 
+  // Automatically create/update promo code if provided in update
+  if (req.body.promoCode) {
+    const promoCodeStr = req.body.promoCode.toUpperCase().trim();
+
+    // Check if this promo code is already used by another banner/promo
+    const existingPromo = await PromoCode.findOne({ code: promoCodeStr });
+    if (existingPromo && existingPromo.referenceId?.toString() !== banner._id.toString()) {
+      return next(new AppError('This promo code is already in use by another banner or promotion.', 400));
+    }
+
+    await PromoCode.findOneAndUpdate(
+      { referenceId: banner._id }, // Link by banner ID
+      {
+        code: promoCodeStr,
+        discountPercentage: Number(req.body.discountPercentage) || banner.discountPercentage || 0,
+        isActive: true,
+        isSecret: false,
+        createdBy: req.user.id,
+        referenceId: banner._id
+      },
+      { upsert: true, new: true, runValidators: true }
+    );
+  }
+
   // Log admin activity
   await AdminActivity.logActivity({
     adminUser: req.user.id,
@@ -130,7 +180,10 @@ exports.deleteBanner = catchAsync(async (req, res, next) => {
     return next(new AppError('Banner not found', 404));
   }
 
-  await banner.remove();
+  await banner.deleteOne();
+
+  // Delete associated promo code if exists
+  await PromoCode.findOneAndDelete({ referenceId: banner._id });
 
   // Log admin activity
   await AdminActivity.logActivity({
