@@ -241,6 +241,13 @@ productSchema.virtual('discountPercentage').get(function () {
   return 0;
 });
 
+// Helper function to calculate stock status
+const calculateStockStatus = (quantity, threshold) => {
+  if (quantity <= 0) return 'out_of_stock';
+  if (quantity <= threshold) return 'low_stock';
+  return 'in_stock';
+};
+
 // Pre-validate middleware
 productSchema.pre('validate', function (next) {
   // Generate slug from name
@@ -256,13 +263,7 @@ productSchema.pre('validate', function (next) {
   }
 
   // Calculate stock status
-  if (this.stockQuantity <= 0) {
-    this.stockStatus = 'out_of_stock';
-  } else if (this.stockQuantity <= this.lowStockThreshold) {
-    this.stockStatus = 'low_stock';
-  } else {
-    this.stockStatus = 'in_stock';
-  }
+  this.stockStatus = calculateStockStatus(this.stockQuantity, this.lowStockThreshold);
 
   // Calculate offer price
   const now = new Date();
@@ -279,6 +280,24 @@ productSchema.pre('validate', function (next) {
     this.isOnOffer = false;
   }
 
+  next();
+});
+
+// Update stock status on findOneAndUpdate
+productSchema.pre('findOneAndUpdate', async function (next) {
+  const update = this.getUpdate();
+  
+  // If stockQuantity or lowStockThreshold is being updated
+  if (update.stockQuantity !== undefined || update.lowStockThreshold !== undefined) {
+    // Get current document to get values not being updated
+    const docToUpdate = await this.model.findOne(this.getQuery());
+    if (docToUpdate) {
+      const quantity = update.stockQuantity !== undefined ? update.stockQuantity : docToUpdate.stockQuantity;
+      const threshold = update.lowStockThreshold !== undefined ? update.lowStockThreshold : docToUpdate.lowStockThreshold;
+      
+      update.stockStatus = calculateStockStatus(quantity, threshold);
+    }
+  }
   next();
 });
 

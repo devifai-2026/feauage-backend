@@ -157,7 +157,6 @@ exports.handlePaymentCallback = catchAsync(async (req, res, next) => {
 
 // @desc    Verify Razorpay payment (for manual verification if needed)
 // @route   POST /api/v1/payments/verify
-// @route   POST /api/v1/payments/verify
 // @access  Private
 exports.verifyPayment = catchAsync(async (req, res, next) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature, orderId } = req.body;

@@ -42,131 +42,70 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
     const currentUserId = req.user.id;
 
     // 1. Get all stats in parallel for better performance
-    const [
-      // Total counts - EXCLUDE ADMIN USERS
-      totalUsers,
-      totalOrders,
-      totalProducts,
+      // Get current target for the logged-in user (defaults to monthly or specified by query)
+      const targetPeriod = req.query.targetPeriod || 'monthly';
+      let targetStartDate, targetEndDate;
+      const now = new Date(nowIST);
+      
+      if (targetPeriod === 'monthly') {
+        targetStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        targetEndDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      } else if (targetPeriod === 'quarterly') {
+        const quarter = Math.floor(now.getMonth() / 3);
+        targetStartDate = new Date(now.getFullYear(), quarter * 3, 1);
+        targetEndDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0, 23, 59, 59, 999);
+      } else if (targetPeriod === 'half-yearly') {
+        const half = now.getMonth() < 6 ? 0 : 6;
+        targetStartDate = new Date(now.getFullYear(), half, 1);
+        targetEndDate = new Date(now.getFullYear(), half + 6, 0, 23, 59, 59, 999);
+      } else if (targetPeriod === 'annually' || targetPeriod === 'yearly') {
+        targetStartDate = new Date(now.getFullYear(), 0, 1);
+        targetEndDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+      }
 
-      // Revenue stats
-      totalRevenueAllTime,
-      totalRevenueLast30Days,
-      todayRevenue,
-      revenuePrevious30Days,
-
-      // Order stats
-      todayOrders,
-      pendingOrders,
-      deliveredOrders,
-      totalOrdersPrevious30Days,
-
-      // User stats - EXCLUDE ADMIN USERS
-      newUsersLast30Days,
-      newUsersPrevious30Days,
-
-      // Get current month's revenue target for the logged-in user
-      currentMonthTarget,
-
-      // Analytics data for performance metrics
-      analyticsData
-    ] = await Promise.all([
-      User.countDocuments({
-        isActive: true,
-        role: { $ne: 'admin' }
-      }),
-      Order.countDocuments(),
-      Product.countDocuments({ isActive: true }),
-
-      // Revenue stats
-      Order.aggregate([
-        { $match: { status: 'delivered' } },
-        { $group: { _id: null, total: { $sum: '$grandTotal' } } }
-      ]),
-      Order.aggregate([
-        {
-          $match: {
-            status: 'delivered',
-            createdAt: { $gte: thirtyDaysAgo }
-          }
-        },
-        { $group: { _id: null, total: { $sum: '$grandTotal' } } }
-      ]),
-      Order.aggregate([
-        {
-          $match: {
-            status: 'delivered',
-            createdAt: { $gte: today }
-          }
-        },
-        { $group: { _id: null, total: { $sum: '$grandTotal' } } }
-      ]),
-      Order.aggregate([
-        {
-          $match: {
-            status: 'delivered',
-            createdAt: {
-              $gte: sixtyDaysAgo,
-              $lt: thirtyDaysAgo
-            }
-          }
-        },
-        { $group: { _id: null, total: { $sum: '$grandTotal' } } }
-      ]),
-
-      // Order stats
-      Order.countDocuments({ createdAt: { $gte: today } }),
-      Order.countDocuments({ status: 'pending' }),
-      Order.countDocuments({ status: 'delivered' }),
-      Order.countDocuments({
-        createdAt: {
-          $gte: sixtyDaysAgo,
-          $lt: thirtyDaysAgo
-        }
-      }),
-
-      // User growth - Exclude admin users
-      User.countDocuments({
-        createdAt: { $gte: thirtyDaysAgo },
-        isActive: true,
-        role: { $ne: 'admin' }
-      }),
-      User.countDocuments({
-        createdAt: {
-          $gte: sixtyDaysAgo,
-          $lt: thirtyDaysAgo
-        },
-        isActive: true,
-        role: { $ne: 'admin' }
-      }),
-
-      // Get current month's revenue target for the logged-in user
-      Target.findOne({
+      const currentPeriodTargetPromise = Target.findOne({
         userId: currentUserId,
         targetType: 'revenue',
-        period: 'monthly',
+        period: targetPeriod,
         isActive: true,
-        startDate: { $lte: nowIST },
-        endDate: { $gte: nowIST }
-      }).sort({ createdAt: -1 }),
+        startDate: { $lte: targetEndDate },
+        endDate: { $gte: targetStartDate },
+        status: 'active'
+      }).sort({ createdAt: -1 });
 
-      // Get analytics data for performance metrics
-      Analytics.aggregate([
-        {
-          $match: {
-            timestamp: { $gte: thirtyDaysAgo },
-            type: 'page_view'
-          }
-        },
-        {
-          $group: {
-            _id: '$sessionId',
-            firstView: { $min: '$timestamp' },
-            lastView: { $max: '$timestamp' },
-            pageViews: { $sum: 1 }
-          }
-        }
-      ])
-    ]);
+      const [
+        totalUsers,
+        totalOrders,
+        totalProducts,
+        totalRevenueAllTime,
+        totalRevenueLast30Days,
+        todayRevenue,
+        revenuePrevious30Days,
+        todayOrders,
+        pendingOrders,
+        deliveredOrders,
+        totalOrdersPrevious30Days,
+        newUsersLast30Days,
+        newUsersPrevious30Days,
+        currentMonthTarget,
+        analyticsData
+      ] = await Promise.all([
+        User.countDocuments({ isActive: true, role: { $ne: 'admin' } }),
+        Order.countDocuments(),
+        Product.countDocuments({ isActive: true }),
+        Order.aggregate([{ $match: { status: 'delivered' } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+        Order.aggregate([{ $match: { status: 'delivered', createdAt: { $gte: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+        Order.aggregate([{ $match: { status: 'delivered', createdAt: { $gte: today } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+        Order.aggregate([{ $match: { status: 'delivered', createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+        Order.countDocuments({ createdAt: { $gte: today } }),
+        Order.countDocuments({ status: 'pending' }),
+        Order.countDocuments({ status: 'delivered' }),
+        Order.countDocuments({ createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } }),
+        User.countDocuments({ createdAt: { $gte: thirtyDaysAgo }, isActive: true, role: { $ne: 'admin' } }),
+        User.countDocuments({ createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo }, isActive: true, role: { $ne: 'admin' } }),
+        currentPeriodTargetPromise,
+        Analytics.aggregate([{ $match: { timestamp: { $gte: thirtyDaysAgo }, type: 'page_view' } }, { $group: { _id: '$sessionId', firstView: { $min: '$timestamp' }, lastView: { $max: '$timestamp' }, pageViews: { $sum: 1 } } }])
+      ]);
 
     // 2. Calculate growth percentages
     const revenueLast30DaysValue = totalRevenueLast30Days[0]?.total || 0;
@@ -583,6 +522,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
         .limit(5)
         .populate('user', 'firstName lastName email')
         .populate('items')
+        .populate('items')
         .select('orderId user grandTotal status createdAt');
     } catch (error) {
       console.error('Error fetching recent orders:', error);
@@ -733,7 +673,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
           amount: order.grandTotal,
           status: order.status,
           date: order.createdAt,
-          itemsCount: order.items?.length || 0
+          itemsCount: order.items?.reduce((acc, item) => acc + item.quantity, 0) || 0
         })),
 
         // User growth progress data
@@ -2634,7 +2574,7 @@ exports.getUserConversionDetails = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 exports.setMonthlyTarget = catchAsync(async (req, res, next) => {
   try {
-    const { targetValue, targetType = 'revenue', description } = req.body;
+    const { targetValue, targetType = 'revenue', period = 'monthly', description } = req.body;
     const userId = req.user.id;
 
     if (!targetValue || targetValue <= 0) {
@@ -2644,15 +2584,33 @@ exports.setMonthlyTarget = catchAsync(async (req, res, next) => {
       });
     }
 
-    // Get current month start and end dates
+    // Get period start and end dates
     const now = new Date();
-    const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    let startDate, endDate;
+    
+    if (period === 'monthly') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    } else if (period === 'quarterly') {
+      const quarter = Math.floor(now.getMonth() / 3);
+      startDate = new Date(now.getFullYear(), quarter * 3, 1);
+      endDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0, 23, 59, 59, 999);
+    } else if (period === 'half-yearly') {
+      const half = now.getMonth() < 6 ? 0 : 6;
+      startDate = new Date(now.getFullYear(), half, 1);
+      endDate = new Date(now.getFullYear(), half + 6, 0, 23, 59, 59, 999);
+    } else if (period === 'annually' || period === 'yearly') {
+      startDate = new Date(now.getFullYear(), 0, 1);
+      endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+    } else {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    }
 
-    // Check if there's already an active target for this month and type
     const existingTarget = await Target.findOne({
       userId,
       targetType,
+      period,
       startDate: { $lte: now },
       endDate: { $gte: now },
       status: 'active',
@@ -2674,7 +2632,7 @@ exports.setMonthlyTarget = catchAsync(async (req, res, next) => {
         userId,
         targetType,
         targetValue,
-        period: 'monthly',
+        period,
         startDate,
         endDate,
         currentValue: 0,
@@ -2746,17 +2704,36 @@ exports.setMonthlyTarget = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 exports.getMonthlyTarget = catchAsync(async (req, res, next) => {
   try {
-    const { targetType = 'revenue' } = req.query;
+    const { targetType = 'revenue', period = 'monthly' } = req.query;
     const userId = req.user.id;
 
     const now = new Date();
-    const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    let startDate, endDate;
 
-    // Get current month target
+    if (period === 'monthly') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    } else if (period === 'quarterly') {
+      const quarter = Math.floor(now.getMonth() / 3);
+      startDate = new Date(now.getFullYear(), quarter * 3, 1);
+      endDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0, 23, 59, 59, 999);
+    } else if (period === 'half-yearly') {
+      const half = now.getMonth() < 6 ? 0 : 6;
+      startDate = new Date(now.getFullYear(), half, 1);
+      endDate = new Date(now.getFullYear(), half + 6, 0, 23, 59, 59, 999);
+    } else if (period === 'annually' || period === 'yearly') {
+      startDate = new Date(now.getFullYear(), 0, 1);
+      endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+    } else {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    }
+
+    // Get current period target
     let target = await Target.findOne({
       userId,
       targetType,
+      period,
       startDate: { $lte: now },
       endDate: { $gte: now },
       status: 'active',

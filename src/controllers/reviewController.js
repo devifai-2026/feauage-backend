@@ -4,6 +4,7 @@ const Order = require('../models/Order');
 const OrderItem = require('../models/OrderItem');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
+const mongoose = require('mongoose');
 
 // @desc    Create review
 // @route   POST /api/v1/reviews
@@ -56,7 +57,7 @@ exports.createReview = catchAsync(async (req, res, next) => {
     comment,
     images: images || [],
     isVerifiedPurchase,
-    isApproved: false // Admin needs to approve reviews
+    isApproved: true // Auto-approved for development
   });
 
   res.status(201).json({
@@ -74,8 +75,7 @@ exports.getProductReviews = catchAsync(async (req, res, next) => {
   const { page = 1, limit = 10, rating, sort = 'newest' } = req.query;
 
   const query = {
-    product: req.params.productId,
-    isApproved: true
+    product: req.params.productId
   };
 
   // Filter by rating if provided
@@ -115,8 +115,7 @@ exports.getProductReviews = catchAsync(async (req, res, next) => {
   const ratingDistribution = await Review.aggregate([
     {
       $match: {
-        product: mongoose.Types.ObjectId(req.params.productId),
-        isApproved: true
+        product: new mongoose.Types.ObjectId(req.params.productId)
       }
     },
     {
@@ -132,8 +131,7 @@ exports.getProductReviews = catchAsync(async (req, res, next) => {
   const avgRating = await Review.aggregate([
     {
       $match: {
-        product: mongoose.Types.ObjectId(req.params.productId),
-        isApproved: true
+        product: new mongoose.Types.ObjectId(req.params.productId)
       }
     },
     {

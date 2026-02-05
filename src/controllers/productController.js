@@ -54,7 +54,6 @@ exports.getProduct = catchAsync(async (req, res, next) => {
     .populate('gemstones')
     .populate({
       path: 'reviews',
-      match: { isApproved: true },
       options: { sort: { createdAt: -1 } },
       populate: {
         path: 'user',
@@ -64,6 +63,15 @@ exports.getProduct = catchAsync(async (req, res, next) => {
   
   if (!product || !product.isActive) {
     return next(new AppError('Product not found', 404));
+  }
+
+  // Self-healing: Update ratings if they are out of sync
+  if (product.reviews && product.ratingCount !== product.reviews.length) {
+    await Review.updateProductRatings(product._id);
+    // Reload the product object to get updated stats
+    const updatedStats = await Product.findById(product._id).select('ratingAverage ratingCount');
+    product.ratingAverage = updatedStats.ratingAverage;
+    product.ratingCount = updatedStats.ratingCount;
   }
   
   // Increment view count
@@ -91,7 +99,7 @@ exports.getProduct = catchAsync(async (req, res, next) => {
     isActive: true
   })
   .limit(4)
-  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage')
+  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({
@@ -213,8 +221,7 @@ exports.deleteProduct = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getProductReviews = catchAsync(async (req, res, next) => {
   const reviews = await Review.find({ 
-    product: req.params.id,
-    isApproved: true 
+    product: req.params.id
   })
     .populate('user', 'firstName lastName profileImage')
     .sort('-createdAt');
@@ -342,7 +349,7 @@ exports.getFeaturedProducts = catchAsync(async (req, res, next) => {
     isFeatured: true
   })
   .limit(10)
-  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage')
+  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({
@@ -363,7 +370,7 @@ exports.getNewArrivals = catchAsync(async (req, res, next) => {
     isNewArrival: true
   })
   .limit(10)
-  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage')
+  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({
@@ -384,7 +391,7 @@ exports.getBestSellers = catchAsync(async (req, res, next) => {
     isBestSeller: true
   })
   .limit(10)
-  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage purchaseCount')
+  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage purchaseCount stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({
@@ -407,7 +414,7 @@ exports.getProductsOnSale = catchAsync(async (req, res, next) => {
     offerEndDate: { $gte: new Date() }
   })
   .limit(10)
-  .select('name slug sellingPrice offerPrice discountValue discountType images')
+  .select('name slug sellingPrice offerPrice discountValue discountType images stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({
@@ -493,7 +500,7 @@ exports.getSimilarProducts = catchAsync(async (req, res, next) => {
     isActive: true
   })
   .limit(8)
-  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage')
+  .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
   .populate('images');
   
   res.status(200).json({

@@ -119,6 +119,12 @@ const {
   getActivityLog,
 } = require("../controllers/admin/profileController");
 
+const {
+  getAllReviews,
+  updateReviewStatus,
+  deleteReview: deleteAdminReview,
+} = require("../controllers/admin/reviewController");
+
 const { protect, restrictTo, isAdmin } = require("../middleware/auth");
 const {
   uploadProductImages: uploadProductImagesMiddleware,
@@ -262,5 +268,10 @@ router.get("/profile/activity", getActivityLog);
 
 //aws routes
 router.post("/s3/presigned-url", generatePresignedUrl);
+
+// Review management
+router.get("/reviews", getAllReviews);
+router.patch("/reviews/:id/status", updateReviewStatus);
+router.delete("/reviews/:id", deleteAdminReview);
 
 module.exports = router;

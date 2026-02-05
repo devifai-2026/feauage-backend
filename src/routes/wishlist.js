@@ -8,12 +8,12 @@ const {
   getWishlistCount,
   moveToCart
 } = require('../controllers/wishlistController');
-const { protect } = require('../middleware/auth');
+const { identify } = require('../middleware/auth');
 
 const router = express.Router();
 
-// All routes require authentication
-router.use(protect);
+// Allow both authenticated users and guests
+router.use(identify);
 
 router.get('/', getWishlist);
 router.get('/count', getWishlistCount);

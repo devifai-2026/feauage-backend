@@ -57,8 +57,8 @@ cartItemSchema.post('save', async function() {
   }
 });
 
-// Post-remove middleware to update cart totals
-cartItemSchema.post('remove', async function() {
+// Post-deleteOne middleware to update cart totals
+cartItemSchema.post('deleteOne', { document: true, query: false }, async function() {
   const cart = await mongoose.model('Cart').findById(this.cart);
   if (cart) {
     // Remove item from cart items array

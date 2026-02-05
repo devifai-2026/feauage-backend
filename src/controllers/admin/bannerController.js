@@ -14,6 +14,7 @@ exports.getAllBanners = catchAsync(async (req, res, next) => {
     .limitFields()
     .paginate();
 
+
   const banners = await features.query
     .populate('createdBy', 'firstName lastName')
     .sort('displayOrder');

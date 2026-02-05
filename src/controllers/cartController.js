@@ -10,7 +10,8 @@ const AppError = require('../utils/appError');
 // @route   GET /api/v1/cart
 // @access  Private
 exports.getCart = catchAsync(async (req, res, next) => {
-  const cart = await Cart.findOne({ user: req.user.id })
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  const cart = await Cart.findOne(query)
     .populate({
       path: 'items',
       populate: {
@@ -26,7 +27,7 @@ exports.getCart = catchAsync(async (req, res, next) => {
   
   if (!cart) {
     // Create cart if it doesn't exist
-    const newCart = await Cart.create({ user: req.user.id });
+    const newCart = await Cart.create(req.user ? { user: req.user.id } : { guestId: req.guestId });
     return res.status(200).json({
       status: 'success',
       data: {
@@ -64,9 +65,10 @@ exports.addToCart = catchAsync(async (req, res, next) => {
   }
   
   // Get or create cart
-  let cart = await Cart.findOne({ user: req.user.id });
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  let cart = await Cart.findOne(query);
   if (!cart) {
-    cart = await Cart.create({ user: req.user.id });
+    cart = await Cart.create(query);
   }
   
   // Check if item already exists in cart
@@ -104,7 +106,8 @@ exports.addToCart = catchAsync(async (req, res, next) => {
     type: 'add_to_cart',
     entityId: productId,
     entityType: 'Product',
-    user: req.user._id,
+    user: req.user ? req.user._id : null,
+    guestId: req.guestId || null,
     sessionId: req.sessionID || 'anonymous',
     ipAddress: req.ip,
     userAgent: req.get('user-agent'),
@@ -138,9 +141,17 @@ exports.updateCartItem = catchAsync(async (req, res, next) => {
     return next(new AppError('Cart item not found', 404));
   }
   
-  // Verify cart belongs to user
+  // Verify cart belongs to user/guest
   const cart = await Cart.findById(cartItem.cart);
-  if (!cart || cart.user.toString() !== req.user.id) {
+  if (!cart) {
+    return next(new AppError('Cart not found', 404));
+  }
+
+  const isOwner = req.user 
+    ? cart.user && cart.user.toString() === req.user.id 
+    : cart.guestId === req.guestId;
+
+  if (!isOwner) {
     return next(new AppError('Not authorized', 403));
   }
   
@@ -176,14 +187,22 @@ exports.removeCartItem = catchAsync(async (req, res, next) => {
     return next(new AppError('Cart item not found', 404));
   }
   
-  // Verify cart belongs to user
+  // Verify cart belongs to user/guest
   const cart = await Cart.findById(cartItem.cart);
-  if (!cart || cart.user.toString() !== req.user.id) {
+  if (!cart) {
+    return next(new AppError('Cart not found', 404));
+  }
+
+  const isOwner = req.user 
+    ? cart.user && cart.user.toString() === req.user.id 
+    : cart.guestId === req.guestId;
+
+  if (!isOwner) {
     return next(new AppError('Not authorized', 403));
   }
   
   // Remove item
-  await cartItem.remove();
+  await cartItem.deleteOne();
   
   // Calculate totals
   await cart.calculateTotals();
@@ -198,7 +217,8 @@ exports.removeCartItem = catchAsync(async (req, res, next) => {
 // @route   DELETE /api/v1/cart
 // @access  Private
 exports.clearCart = catchAsync(async (req, res, next) => {
-  const cart = await Cart.findOne({ user: req.user.id });
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  const cart = await Cart.findOne(query);
   
   if (!cart) {
     return next(new AppError('Cart not found', 404));
@@ -219,7 +239,8 @@ exports.applyCoupon = catchAsync(async (req, res, next) => {
   const { couponCode } = req.body;
   
   // Find cart
-  let cart = await Cart.findOne({ user: req.user.id })
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  let cart = await Cart.findOne(query)
     .populate('items')
     .populate('couponApplied');
   
@@ -237,7 +258,7 @@ exports.applyCoupon = catchAsync(async (req, res, next) => {
   }
   
   // Validate coupon
-  const validation = coupon.validateCoupon(cart.cartTotal, req.user.id);
+  const validation = coupon.validateCoupon(cart.cartTotal, req.user ? req.user.id : null);
   if (!validation.isValid) {
     return next(new AppError(validation.message, 400));
   }
@@ -268,7 +289,8 @@ exports.applyCoupon = catchAsync(async (req, res, next) => {
 // @route   DELETE /api/v1/cart/remove-coupon
 // @access  Private
 exports.removeCoupon = catchAsync(async (req, res, next) => {
-  const cart = await Cart.findOne({ user: req.user.id });
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  const cart = await Cart.findOne(query);
   
   if (!cart) {
     return next(new AppError('Cart not found', 404));
@@ -289,7 +311,8 @@ exports.removeCoupon = catchAsync(async (req, res, next) => {
 // @route   GET /api/v1/cart/count
 // @access  Private
 exports.getCartCount = catchAsync(async (req, res, next) => {
-  const cart = await Cart.findOne({ user: req.user.id }).populate('items');
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  const cart = await Cart.findOne(query).populate('items');
   
   const count = cart ? cart.items.length : 0;
   
@@ -305,7 +328,8 @@ exports.getCartCount = catchAsync(async (req, res, next) => {
 // @route   GET /api/v1/cart/check-stock
 // @access  Private
 exports.checkCartStock = catchAsync(async (req, res, next) => {
-  const cart = await Cart.findOne({ user: req.user.id })
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  const cart = await Cart.findOne(query)
     .populate({
       path: 'items',
       populate: {

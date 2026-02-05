@@ -107,10 +107,31 @@ exports.deleteUser = catchAsync(async (req, res, next) => {
 // @route   GET /api/v1/users/addresses
 // @access  Private
 exports.getUserAddresses = catchAsync(async (req, res, next) => {
-  const user = await User.findById(req.user.id);
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 4;
+  const skip = (page - 1) * limit;
+
+  // Since addresses are a subdocument array, we use $slice for DB-level pagination
+  const user = await User.findById(req.user.id, {
+    addresses: { $slice: [skip, limit] }
+  });
+
+  if (!user) {
+    return next(new AppError('User not found', 404));
+  }
+
+  // We also need the total count for pagination metadata
+  // We'll fetch just the length of the addresses array
+  const fullUser = await User.findById(req.user.id).select('addresses');
+  const total = fullUser.addresses ? fullUser.addresses.length : 0;
 
   res.status(200).json({
     status: 'success',
+    results: user.addresses.length,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
     data: {
       addresses: user.addresses
     }
