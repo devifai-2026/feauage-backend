@@ -10,7 +10,7 @@ const StockHistory = require('../models/StockHistory');
 const Analytics = require('../models/Analytics');
 const PromoCode = require('../models/PromoCode');
 const ShippingService = require('../services/shippingService');
-const { emitOrderNotification } = require('../sockets/orderSocket');
+const { emitOrderNotification, notifyNewOrder } = require('../sockets/orderSocket');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const APIFeatures = require('../utils/apiFeatures');
@@ -256,14 +256,8 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     }
   });
 
-  // Emit new order notification
-  emitOrderNotification('new_order', {
-    orderId: order.orderId,
-    userId: req.user.id,
-    userName: user.fullName,
-    total: grandTotal,
-    itemsCount: orderItems.length
-  });
+  // Emit and persist new order notification
+  notifyNewOrder(order._id);
 
   // Create Razorpay order for online payments
   let razorpayOrder = null;

@@ -212,7 +212,13 @@ notificationSchema.statics.createOrderNotification = async function(order, type 
   switch (type) {
     case 'new_order':
       notificationData.title = 'New Order Received';
-      notificationData.message = `New order #${order.orderId} from ${order.user?.firstName || 'Customer'} for ₹${order.grandTotal}`;
+      // Format: [user] bought [product] on [date] at [time]
+      const orderDate = new Date(order.createdAt || Date.now());
+      const dateStr = orderDate.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const timeStr = orderDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+      const productName = order.items && order.items.length > 0 ? order.items[0].productName : 'items';
+      
+      notificationData.message = `${order.user?.firstName || 'A customer'} bought ${productName}${order.items?.length > 1 ? ` and others` : ''} on ${dateStr} at ${timeStr}`;
       break;
     case 'order_update':
       notificationData.title = 'Order Status Updated';

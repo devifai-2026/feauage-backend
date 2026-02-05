@@ -54,12 +54,24 @@ exports.getUnreadCount = catchAsync(async (req, res, next) => {
 exports.getRecentNotifications = catchAsync(async (req, res, next) => {
   const { limit = 10 } = req.query;
 
-  const notifications = await Notification.getUnreadForAdmin(req.user.id, parseInt(limit));
+  const notifications = await Notification.find({
+    recipients: { $in: ['admin', 'superadmin', 'all'] },
+    isActive: true,
+  })
+  .sort({ createdAt: -1 })
+  .limit(parseInt(limit))
+  .lean();
+
+  // Add isRead field to each notification
+  const notificationsWithReadStatus = notifications.map(notification => ({
+    ...notification,
+    isRead: notification.readBy?.some(read => read.user?.toString() === req.user.id)
+  }));
 
   res.status(200).json({
     status: 'success',
     data: {
-      notifications
+      notifications: notificationsWithReadStatus
     }
   });
 });
