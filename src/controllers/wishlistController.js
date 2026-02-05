@@ -9,9 +9,39 @@ const AppError = require('../utils/appError');
 // @route   GET /api/v1/wishlist
 // @access  Private
 exports.getWishlist = catchAsync(async (req, res, next) => {
+  // console.log('getWishlist HIT');
+  // console.log('User:', req.user ? req.user.id : 'None');
+  // console.log('GuestId:', req.guestId);
+  
   const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
-  const wishlist = await Wishlist.findOne(query)
-    .populate({
+  // console.log('Query:', query);
+  
+  // Use findOneAndUpdate with upsert to avoid race conditions
+  let wishlist = await Wishlist.findOneAndUpdate(
+    query,
+    { $setOnInsert: query },
+    { 
+      new: true, 
+      upsert: true, 
+      setDefaultsOnInsert: true,
+      populate: {
+        path: 'items',
+        populate: {
+          path: 'product',
+          select: 'name slug sellingPrice offerPrice isOnOffer stockStatus images ratingAverage',
+          populate: {
+            path: 'images',
+            match: { isPrimary: true }
+          }
+        }
+      }
+    }
+  );
+
+  // Mongoose findOneAndUpdate with populate in options might not work in older versions
+  // or simplistic usage. If population failed or wasn't supported in options:
+  if (!wishlist.populated('items')) {
+    wishlist = await wishlist.populate({
       path: 'items',
       populate: {
         path: 'product',
@@ -20,16 +50,6 @@ exports.getWishlist = catchAsync(async (req, res, next) => {
           path: 'images',
           match: { isPrimary: true }
         }
-      }
-    });
-  
-  if (!wishlist) {
-    // Create wishlist if it doesn't exist
-    const newWishlist = await Wishlist.create(req.user ? { user: req.user.id } : { guestId: req.guestId });
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        wishlist: newWishlist
       }
     });
   }

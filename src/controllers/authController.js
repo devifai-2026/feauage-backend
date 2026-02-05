@@ -3,13 +3,16 @@ const { promisify } = require('util');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Cart = require('../models/Cart');
+const CartItem = require('../models/CartItem');
 const Wishlist = require('../models/Wishlist');
+const WishlistItem = require('../models/WishlistItem');
 const GuestUser = require('../models/GuestUser');
 const Analytics = require('../models/Analytics');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const Email = require('../services/emailService');
 const mongoose = require('mongoose');
+
 
 const signToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -22,6 +25,7 @@ const createSendToken = async (user, statusCode, res, guestId = null) => {
 
   // Merge guest data if guestId is provided
   if (guestId) {
+    // Await the merge process to ensure data is consistent before sending response
     await mergeGuestData(user._id, guestId);
   }
 
@@ -39,57 +43,101 @@ const createSendToken = async (user, statusCode, res, guestId = null) => {
 
 const mergeGuestData = async (userId, guestId) => {
   try {
-    console.log(`Merging guest data for guestId: ${guestId} into userId: ${userId}`);
+    if (!guestId || guestId === 'undefined' || guestId === 'null') {
+      console.log('Merge skipped: Invalid guestId:', guestId);
+      return;
+    }
     
-    // 1) Merge Cart
+    // Normalize guestId
+    guestId = guestId.toString().trim();
+    
+    console.log(`START MERGE: guestId="${guestId}" -> userId="${userId}"`);
+    
+    // 1) Find Guest Cart
     const guestCart = await Cart.findOne({ guestId }).populate('items');
-    if (guestCart && guestCart.items && guestCart.items.length > 0) {
+    
+    if (!guestCart) {
+      console.log('Guest Cart not found.');
+    } else if (!guestCart.items || guestCart.items.length === 0) {
+      console.log('Guest Cart is empty.');
+      await Cart.findByIdAndDelete(guestCart._id); // Cleanup empty cart
+    } else {
+      console.log(`Guest Cart Found with ${guestCart.items.length} items.`);
+      
+      // Find or Create User Cart
       let userCart = await Cart.findOne({ user: userId });
       if (!userCart) {
+        console.log('User Cart not found, creating new one.');
         userCart = await Cart.create({ user: userId });
       }
 
-      const CartItem = mongoose.model('CartItem');
-      const userItemIdsStr = userCart.items.map(id => id.toString());
+      // We need to reload userCart items to be sure
+      userCart = await Cart.findById(userCart._id).populate('items');
+      const userItemIdsStr = userCart.items.map(i => i._id.toString());
       
+      console.log(`User Cart Start Items: ${userCart.items.length}`);
+
       for (const guestItem of guestCart.items) {
         if (!guestItem || !guestItem.product) continue;
+        
         const productId = (guestItem.product._id || guestItem.product).toString();
         
-        // Check if item already exists in user cart
+        // Check if product already exists in user's cart (by product ID)
+        // We look in the `items` array of userCart because querying CartItem by cart ID is safer
         const existingItem = await CartItem.findOne({
           cart: userCart._id,
           product: productId
         });
 
         if (existingItem) {
+          console.log(`Item ${productId} exists in user cart. merging quantity.`);
+          // Update quantity
           existingItem.quantity += guestItem.quantity;
           await existingItem.save();
-          await CartItem.deleteOne({ _id: guestItem._id });
+          
+          // Delete the guest item since we merged it
+          await CartItem.findByIdAndDelete(guestItem._id);
         } else {
-          await CartItem.findByIdAndUpdate(guestItem._id, { cart: userCart._id });
-          if (!userItemIdsStr.includes(guestItem._id.toString())) {
-            userCart.items.push(guestItem._id);
-            userItemIdsStr.push(guestItem._id.toString());
+          console.log(`Item ${productId} does not exist. Moving to user cart.`);
+          // Move item to user cart
+          // IMPORTANT: Explicitly use findOneAndUpdate to ensure atomic update of the reference
+          const movedItem = await CartItem.findOneAndUpdate(
+            { _id: guestItem._id },
+            { $set: { cart: userCart._id } },
+            { new: true }
+          );
+          
+          // Add to userCart items array if not already present (double check)
+          if (movedItem && !userItemIdsStr.includes(movedItem._id.toString())) {
+            userCart.items.push(movedItem._id);
+            userItemIdsStr.push(movedItem._id.toString());
           }
         }
       }
       
+      // Save changes to user cart
       await userCart.save();
+      // Recalculate totals
       await userCart.calculateTotals();
+      console.log(`User Cart End: ${userCart.items.length} items.`);
+      
+      // Delete guest cart
       await Cart.findByIdAndDelete(guestCart._id);
+      console.log('Guest Cart deleted.');
     }
 
     // 2) Merge Wishlist
     const guestWishlist = await Wishlist.findOne({ guestId }).populate('items');
     if (guestWishlist && guestWishlist.items && guestWishlist.items.length > 0) {
+      console.log(`Merging Wishlist: ${guestWishlist.items.length} items.`);
+      
       let userWishlist = await Wishlist.findOne({ user: userId });
       if (!userWishlist) {
         userWishlist = await Wishlist.create({ user: userId });
       }
-
-      const WishlistItem = mongoose.model('WishlistItem');
-      const userItemIdsStr = userWishlist.items.map(id => id.toString());
+      // Populate to safely check
+      userWishlist = await Wishlist.findById(userWishlist._id).populate('items');
+      const userItemIdsStr = userWishlist.items.map(i => i._id.toString());
 
       for (const guestItem of guestWishlist.items) {
         if (!guestItem || !guestItem.product) continue;
@@ -101,7 +149,7 @@ const mergeGuestData = async (userId, guestId) => {
         });
 
         if (existingItem) {
-          await WishlistItem.deleteOne({ _id: guestItem._id });
+          await WishlistItem.findByIdAndDelete(guestItem._id);
         } else {
           await WishlistItem.findByIdAndUpdate(guestItem._id, { wishlist: userWishlist._id });
           if (!userItemIdsStr.includes(guestItem._id.toString())) {
@@ -113,13 +161,14 @@ const mergeGuestData = async (userId, guestId) => {
       await userWishlist.save();
       await Wishlist.findByIdAndDelete(guestWishlist._id);
     }
-
-    // 3) Update analytics and guest user record
+    
+    // 3) Mark conversion
     await GuestUser.findOneAndUpdate(
       { guestId }, 
       { convertedToUser: true, convertedUserId: userId, convertedAt: new Date() }
     );
-    await Analytics.updateMany({ guestId }, { user: userId });
+     // Use deleteMany or updateMany safely
+    await Analytics.updateMany({ guestId }, { $set: { user: userId } });
     
     console.log(`Successfully merged guest data for ${guestId}`);
   } catch (error) {
@@ -246,7 +295,10 @@ exports.login = catchAsync(async (req, res, next) => {
   });
 
   // 7) If everything ok, send token to client
-  const guestId = req.headers['x-guest-id'] || req.body.guestId;
+  let guestId = req.body.guestId || req.headers['x-guest-id'];
+  console.log('Login Controller - Received guestId:', guestId);
+  if (guestId) guestId = guestId.toString().trim();
+  
   await createSendToken(user, 200, res, guestId);
 });
 

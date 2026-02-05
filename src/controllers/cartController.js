@@ -10,34 +10,68 @@ const AppError = require('../utils/appError');
 // @route   GET /api/v1/cart
 // @access  Private
 exports.getCart = catchAsync(async (req, res, next) => {
-  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
-  const cart = await Cart.findOne(query)
-    .populate({
-      path: 'items',
-      populate: {
-        path: 'product',
-        select: 'name slug sellingPrice offerPrice isOnOffer stockQuantity stockStatus images',
-        populate: {
-          path: 'images',
-          match: { isPrimary: true }
-        }
-      }
-    })
-    .populate('couponApplied');
+  let cart;
 
-  if (!cart) {
-    // Create cart if it doesn't exist
-    const newCart = await Cart.create(req.user ? { user: req.user.id } : { guestId: req.guestId });
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        cart: newCart
+  // 1. Authenticated User
+  if (req.user) {
+    const query = { user: req.user.id };
+    cart = await Cart.findOne(query)
+      .populate({
+        path: 'items',
+        populate: {
+          path: 'product',
+          select: 'name slug sellingPrice offerPrice isOnOffer stockQuantity stockStatus images',
+          populate: { path: 'images', match: { isPrimary: true } }
+        }
+      })
+      .populate('couponApplied');
+
+    if (!cart) {
+      cart = await Cart.create({ user: req.user.id });
+    }
+  } 
+  
+  // 2. Guest User
+  else {
+    const guestId = req.guestId;
+    if (!guestId) {
+      // Should be caught by identify middleware, but extra safety
+      return next(new AppError('No user or guest identification provided', 400));
+    }
+
+    // Explicitly query ONLY by guestId to avoid ANY index collision with 'user: null'
+    cart = await Cart.findOne({ guestId })
+      .populate({
+        path: 'items',
+        populate: {
+          path: 'product',
+          select: 'name slug sellingPrice offerPrice isOnOffer stockQuantity stockStatus images',
+          populate: { path: 'images', match: { isPrimary: true } }
+        }
+      })
+      .populate('couponApplied');
+
+    if (!cart) {
+      // Create specifically with guestId.
+      // IMPORTANT: Do NOT include 'user' field at all, or ensure it is undefined.
+      // If we pass 'user: null', it might violate unique index if another cart has 'user: null'.
+      // Mongoose sparse index allows multiple docs to miss the field, but only one to have explicit null.
+      try {
+        cart = new Cart({ guestId });
+        // Validate to ensure no defaults are setting user to null
+        cart.user = undefined; 
+        await cart.save();
+      } catch (err) {
+        console.error('Guest Cart Creation Error:', err);
+        throw err;
       }
-    });
+    }
   }
 
   // Calculate totals
-  await cart.calculateTotals();
+  if (cart) {
+    await cart.calculateTotals();
+  }
 
   res.status(200).json({
     status: 'success',

@@ -183,8 +183,10 @@ exports.identify = async (req, res, next) => {
     }
 
     // 3) Check for Guest ID in headers
-    const guestId = req.headers['x-guest-id'];
+    let guestId = req.headers['x-guest-id'];
     if (guestId) {
+      guestId = guestId.toString().trim();
+      console.log('Identify Middleware - Guest detected:', guestId);
       req.guestId = guestId;
       return next();
     }

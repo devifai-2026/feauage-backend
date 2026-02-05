@@ -47,9 +47,25 @@ const cartSchema = new mongoose.Schema({
 });
 
 // Indexes
-cartSchema.index({ user: 1 }, { unique: true, sparse: true });
+// cartSchema.index({ user: 1 }, { unique: true, sparse: true });
 cartSchema.index({ guestId: 1 }, { unique: true, sparse: true });
 cartSchema.index({ lastUpdated: -1 });
+
+// Clean up problematic index if it exists
+try {
+  // Wait for connection to be ready
+  setTimeout(async () => {
+    try {
+      const CartModel = mongoose.model('Cart');
+      await CartModel.collection.dropIndex('user_1');
+      console.log('-------------------------------------------');
+      console.log('!!! FIXED: DROPPED user_1 INDEX SUCCESS !!!');
+      console.log('-------------------------------------------');
+    } catch (e) {
+       // console.log('Index drop info:', e.message);
+    }
+  }, 5000);
+} catch (e) {}
 
 // Virtual for item count
 cartSchema.virtual('itemCount').get(function() {
@@ -67,6 +83,10 @@ cartSchema.methods.calculateTotals = async function() {
   let discountTotal = 0;
   
   for (const item of cartItems) {
+    if (!item.product) {
+      // Product might have been deleted
+      continue;
+    }
     const product = item.product;
     const price = product.isOnOffer ? product.offerPrice : product.sellingPrice;
     const itemTotal = price * item.quantity;

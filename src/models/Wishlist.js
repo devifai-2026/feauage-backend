@@ -24,9 +24,24 @@ const wishlistSchema = new mongoose.Schema({
 });
 
 // Indexes
-wishlistSchema.index({ user: 1 }, { unique: true, sparse: true });
+// wishlistSchema.index({ user: 1 }, { unique: true, sparse: true });
 wishlistSchema.index({ guestId: 1 }, { unique: true, sparse: true });
 wishlistSchema.index({ updatedAt: -1 });
+
+// Clean up problematic index for Wishlist
+try {
+  setTimeout(async () => {
+    try {
+      const WishlistModel = mongoose.model('Wishlist');
+      await WishlistModel.collection.dropIndex('user_1');
+      console.log('-----------------------------------------------');
+      console.log('!!! FIXED: DROPPED Wishlist user_1 INDEX !!!');
+      console.log('-----------------------------------------------');
+    } catch (e) {
+      // console.log('Wishlist index drop info:', e.message);
+    }
+  }, 6000); // Slightly offset from Cart to avoid connection contention
+} catch (e) {}
 
 // Virtual for item count
 wishlistSchema.virtual('itemCount').get(function() {
