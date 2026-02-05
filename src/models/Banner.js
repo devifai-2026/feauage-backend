@@ -111,6 +111,19 @@ const bannerSchema = new mongoose.Schema({
   textColor: String,
   buttonText: String,
   buttonColor: String,
+  promoCode: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    sparse: true, // Allow multiple null values, but unique non-null values
+    validate: {
+      validator: function (v) {
+        if (!v) return true;
+        return /^[A-Z0-9]{4,20}$/.test(v);
+      },
+      message: 'Promo code must be 4-20 characters (letters and numbers only)'
+    }
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -129,6 +142,7 @@ bannerSchema.index({ isActive: 1 });
 bannerSchema.index({ startDate: 1, endDate: 1 });
 bannerSchema.index({ createdBy: 1 });
 bannerSchema.index({ bannerType: 1 });
+bannerSchema.index({ promoCode: 1 }, { sparse: true, unique: true });
 
 // Virtual for validity status
 bannerSchema.virtual('isValid').get(function () {
