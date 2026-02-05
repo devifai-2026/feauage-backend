@@ -6,11 +6,12 @@ const AppError = require('../../utils/appError');
 // @route   GET /api/v1/admin/notifications
 // @access  Private/Admin
 exports.getNotifications = catchAsync(async (req, res, next) => {
-  const { page = 1, limit = 20, type, priority, unreadOnly } = req.query;
+  const { page = 1, limit = 20, offset, type, priority, unreadOnly } = req.query;
 
   const result = await Notification.getAdminNotifications({
     page: parseInt(page),
     limit: parseInt(limit),
+    offset: offset ? parseInt(offset) : undefined,
     type,
     priority,
     unreadOnly: unreadOnly === 'true',

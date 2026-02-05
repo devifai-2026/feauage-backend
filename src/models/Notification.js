@@ -128,6 +128,7 @@ notificationSchema.statics.getAdminNotifications = async function(options = {}) 
   const {
     page = 1,
     limit = 20,
+    offset,
     type,
     priority,
     unreadOnly = false,
@@ -145,10 +146,13 @@ notificationSchema.statics.getAdminNotifications = async function(options = {}) 
     query['readBy.user'] = { $ne: adminId };
   }
 
+  // Calculate skip value: use explicit offset if provided, otherwise fallback to page-based calculation
+  const skip = offset !== undefined ? offset : (page - 1) * limit;
+
   const [notifications, total] = await Promise.all([
     this.find(query)
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
+      .skip(skip)
       .limit(limit)
       .lean(),
     this.countDocuments(query)
@@ -157,7 +161,7 @@ notificationSchema.statics.getAdminNotifications = async function(options = {}) 
   return {
     notifications,
     total,
-    page,
+    page: offset !== undefined ? Math.floor(offset / limit) + 1 : page,
     totalPages: Math.ceil(total / limit)
   };
 };
