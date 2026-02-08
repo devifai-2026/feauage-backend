@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const OrderItem = require('../models/OrderItem');
 const OrderAddress = require('../models/OrderAddress');
@@ -340,12 +341,53 @@ exports.getUserOrders = catchAsync(async (req, res, next) => {
     ...features.filterQuery
   });
 
+  const stats = await Order.aggregate([
+    { $match: { user: new mongoose.Types.ObjectId(req.user.id) } },
+    {
+      $group: {
+        _id: null,
+        totalSpent: {
+          $sum: {
+            $cond: [{ $ne: ["$status", "cancelled"] }, "$grandTotal", 0]
+          }
+        },
+        pendingCount: {
+          $sum: {
+            $cond: [{ $in: ["$status", ["pending", "confirmed", "processing"]] }, 1, 0]
+          }
+        },
+        shippedCount: {
+          $sum: {
+            $cond: [{ $eq: ["$status", "shipped"] }, 1, 0]
+          }
+        },
+        deliveredCount: {
+          $sum: {
+            $cond: [{ $eq: ["$status", "delivered"] }, 1, 0]
+          }
+        },
+        cancelledCount: {
+          $sum: {
+            $cond: [{ $in: ["$status", ["cancelled", "returned", "refunded"]] }, 1, 0]
+          }
+        }
+      }
+    }
+  ]);
+
   res.status(200).json({
     status: 'success',
     results: orders.length,
     total,
     data: {
-      orders
+      orders,
+      stats: stats[0] || {
+        totalSpent: 0,
+        pendingCount: 0,
+        shippedCount: 0,
+        deliveredCount: 0,
+        cancelledCount: 0
+      }
     }
   });
 });
