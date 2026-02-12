@@ -65,7 +65,7 @@ exports.createTarget = catchAsync(async (req, res, next) => {
   if (req.body.period !== 'custom' && !req.body.endDate) {
     const start = new Date(req.body.startDate || new Date());
     let end = new Date(start);
-    
+   
     switch(req.body.period) {
       case 'daily':
         end.setDate(end.getDate() + 1);
@@ -79,7 +79,11 @@ exports.createTarget = catchAsync(async (req, res, next) => {
       case 'quarterly':
         end.setMonth(end.getMonth() + 3);
         break;
+      case 'half-yearly':
+        end.setMonth(end.getMonth() + 6);
+        break;
       case 'yearly':
+      case 'annually':
         end.setFullYear(end.getFullYear() + 1);
         break;
     }
@@ -334,44 +338,94 @@ exports.getTargetStats = catchAsync(async (req, res, next) => {
 // @route   GET /api/v1/targets/revenue/monthly
 // @access  Private
 exports.getMonthlyRevenueProgress = catchAsync(async (req, res, next) => {
+  const { period = 'monthly' } = req.query;
   const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  let startDate, endDate, lastPeriodStart, lastPeriodEnd;
 
-  // Get current month's revenue target
-  const monthlyTarget = await Target.findOne({
+  if (period === 'monthly') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    lastPeriodStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    lastPeriodEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+  } else if (period === 'quarterly') {
+    const quarter = Math.floor(now.getMonth() / 3);
+    startDate = new Date(now.getFullYear(), quarter * 3, 1);
+    endDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0);
+    lastPeriodStart = new Date(now.getFullYear(), (quarter - 1) * 3, 1);
+    lastPeriodEnd = new Date(now.getFullYear(), quarter * 3, 0);
+  } else if (period === 'half-yearly') {
+    const half = now.getMonth() < 6 ? 0 : 6;
+    startDate = new Date(now.getFullYear(), half, 1);
+    endDate = new Date(now.getFullYear(), half + 6, 0);
+    lastPeriodStart = new Date(now.getFullYear(), half - 6, 1);
+    lastPeriodEnd = new Date(now.getFullYear(), half, 0);
+  } else if (period === 'annually' || period === 'yearly') {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 12, 0);
+    lastPeriodStart = new Date(now.getFullYear() - 1, 0, 1);
+    lastPeriodEnd = new Date(now.getFullYear() - 1, 12, 0);
+  }
+
+  // Get current period's revenue target
+  const target = await Target.findOne({
     userId: req.user.id,
     targetType: 'revenue',
-    period: 'monthly',
+    period: period,
     isActive: true,
-    startDate: { $lte: endOfMonth },
-    endDate: { $gte: startOfMonth }
+    startDate: { $lte: endDate },
+    endDate: { $gte: startDate }
   }).sort({ createdAt: -1 });
 
-  // Get last month's target for comparison
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-  
-  const lastMonthTarget = await Target.findOne({
+  // Get last period's target for comparison
+  const lastTarget = await Target.findOne({
     userId: req.user.id,
     targetType: 'revenue',
-    period: 'monthly',
+    period: period,
     isActive: false,
-    startDate: { $gte: lastMonthStart, $lte: lastMonthEnd }
+    startDate: { $gte: lastPeriodStart, $lte: lastPeriodEnd }
   }).sort({ createdAt: -1 });
 
-  // Calculate today's earnings (simplified - you might want to fetch from orders)
-  const todayEarnings = Math.random() * 10000; // Replace with actual calculation
+  // Calculate today's earnings (actual calculation from orders)
+  const Order = mongoose.model('Order');
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dailyRevenue = await Order.aggregate([
+    {
+      $match: {
+        status: 'delivered',
+        createdAt: { $gte: startOfToday }
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: '$grandTotal' }
+      }
+    }
+  ]);
+  
+  const todayEarnings = dailyRevenue[0]?.total || 0;
+
+  // Calculate days elapsed/remaining
+  const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+  const daysElapsed = Math.ceil((now - startDate) / (1000 * 60 * 60 * 24));
+  const daysRemaining = Math.max(0, totalDays - daysElapsed);
 
   const response = {
-    hasTarget: !!monthlyTarget,
-    target: monthlyTarget || null,
-    progress: monthlyTarget ? monthlyTarget.progress : 0,
+    hasTarget: !!target,
+    target: target || null,
+    progress: target ? target.progress : 0,
     todayEarnings,
-    increaseFromLastMonth: lastMonthTarget ? 
-      ((monthlyTarget?.progress || 0) - lastMonthTarget.progress) : 0,
-    remaining: monthlyTarget ? 
-      Math.max(0, monthlyTarget.targetValue - monthlyTarget.currentValue) : 0
+    increaseFromLastMonth: lastTarget ? 
+      ((target?.progress || 0) - lastTarget.progress) : 0,
+    remaining: target ? 
+      Math.max(0, target.targetValue - target.currentValue) : 0,
+    currentEarnings: target ? target.currentValue : 0,
+    daysElapsed: {
+      total: totalDays,
+      elapsed: daysElapsed,
+      remaining: daysRemaining
+    },
+    period: period
   };
 
   res.status(200).json({

@@ -3,7 +3,7 @@ dotenv.config();
 
 const app = require('./app');
 const connectDB = require('./configs/database');
-const { initializeSocket } = require('./configs/socket');
+const { initializeSocket } = require('./sockets/orderSocket');
 
 // Connect to database
 connectDB();

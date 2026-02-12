@@ -3,9 +3,17 @@ const socketIO = require('socket.io');
 let io;
 
 exports.initializeSocket = (server) => {
+  // Allow multiple origins for development and production
+  const allowedOrigins = [
+    process.env.CLIENT_URL,
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:5174'
+  ].filter(Boolean);
+
   io = socketIO(server, {
     cors: {
-      origin: process.env.CLIENT_URL || 'http://localhost:3000',
+      origin: allowedOrigins,
       methods: ['GET', 'POST'],
       credentials: true
     }

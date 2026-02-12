@@ -9,8 +9,39 @@ const AppError = require('../utils/appError');
 // @route   GET /api/v1/wishlist
 // @access  Private
 exports.getWishlist = catchAsync(async (req, res, next) => {
-  const wishlist = await Wishlist.findOne({ user: req.user.id })
-    .populate({
+  // console.log('getWishlist HIT');
+  // console.log('User:', req.user ? req.user.id : 'None');
+  // console.log('GuestId:', req.guestId);
+  
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  // console.log('Query:', query);
+  
+  // Use findOneAndUpdate with upsert to avoid race conditions
+  let wishlist = await Wishlist.findOneAndUpdate(
+    query,
+    { $setOnInsert: query },
+    { 
+      new: true, 
+      upsert: true, 
+      setDefaultsOnInsert: true,
+      populate: {
+        path: 'items',
+        populate: {
+          path: 'product',
+          select: 'name slug sellingPrice offerPrice isOnOffer stockStatus images ratingAverage',
+          populate: {
+            path: 'images',
+            match: { isPrimary: true }
+          }
+        }
+      }
+    }
+  );
+
+  // Mongoose findOneAndUpdate with populate in options might not work in older versions
+  // or simplistic usage. If population failed or wasn't supported in options:
+  if (!wishlist.populated('items')) {
+    wishlist = await wishlist.populate({
       path: 'items',
       populate: {
         path: 'product',
@@ -19,16 +50,6 @@ exports.getWishlist = catchAsync(async (req, res, next) => {
           path: 'images',
           match: { isPrimary: true }
         }
-      }
-    });
-  
-  if (!wishlist) {
-    // Create wishlist if it doesn't exist
-    const newWishlist = await Wishlist.create({ user: req.user.id });
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        wishlist: newWishlist
       }
     });
   }
@@ -54,9 +75,10 @@ exports.addToWishlist = catchAsync(async (req, res, next) => {
   }
   
   // Get or create wishlist
-  let wishlist = await Wishlist.findOne({ user: req.user.id });
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  let wishlist = await Wishlist.findOne(query);
   if (!wishlist) {
-    wishlist = await Wishlist.create({ user: req.user.id });
+    wishlist = await Wishlist.create(query);
   }
   
   // Add item to wishlist
@@ -67,7 +89,8 @@ exports.addToWishlist = catchAsync(async (req, res, next) => {
     type: 'add_to_wishlist',
     entityId: productId,
     entityType: 'Product',
-    user: req.user._id,
+    user: req.user ? req.user._id : null,
+    guestId: req.guestId || null,
     sessionId: req.sessionID || 'anonymous',
     ipAddress: req.ip,
     userAgent: req.get('user-agent')
@@ -89,7 +112,8 @@ exports.removeFromWishlist = catchAsync(async (req, res, next) => {
   const { productId } = req.params;
   
   // Get wishlist
-  const wishlist = await Wishlist.findOne({ user: req.user.id });
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  const wishlist = await Wishlist.findOne(query);
   if (!wishlist) {
     return next(new AppError('Wishlist not found', 404));
   }
@@ -111,7 +135,8 @@ exports.removeFromWishlist = catchAsync(async (req, res, next) => {
 // @route   DELETE /api/v1/wishlist
 // @access  Private
 exports.clearWishlist = catchAsync(async (req, res, next) => {
-  const wishlist = await Wishlist.findOne({ user: req.user.id });
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  const wishlist = await Wishlist.findOne(query);
   
   if (!wishlist) {
     return next(new AppError('Wishlist not found', 404));
@@ -131,7 +156,8 @@ exports.clearWishlist = catchAsync(async (req, res, next) => {
 exports.checkInWishlist = catchAsync(async (req, res, next) => {
   const { productId } = req.params;
   
-  const wishlist = await Wishlist.findOne({ user: req.user.id });
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  const wishlist = await Wishlist.findOne(query);
   
   if (!wishlist) {
     return res.status(200).json({
@@ -159,7 +185,8 @@ exports.checkInWishlist = catchAsync(async (req, res, next) => {
 // @route   GET /api/v1/wishlist/count
 // @access  Private
 exports.getWishlistCount = catchAsync(async (req, res, next) => {
-  const wishlist = await Wishlist.findOne({ user: req.user.id });
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  const wishlist = await Wishlist.findOne(query);
   
   const count = wishlist ? wishlist.items.length : 0;
   
@@ -178,7 +205,8 @@ exports.moveToCart = catchAsync(async (req, res, next) => {
   const { productId } = req.params;
   
   // First, remove from wishlist
-  const wishlist = await Wishlist.findOne({ user: req.user.id });
+  const query = req.user ? { user: req.user.id } : { guestId: req.guestId };
+  const wishlist = await Wishlist.findOne(query);
   if (!wishlist) {
     return next(new AppError('Wishlist not found', 404));
   }

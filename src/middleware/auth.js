@@ -126,29 +126,74 @@ exports.isOwnerOrAdmin = (modelName) => {
     try {
       const Model = require(`../models/${modelName}`);
       const resource = await Model.findById(req.params.id);
-      
+
       if (!resource) {
         return next(new AppError('Resource not found', 404));
       }
-      
+
       // Check if user is admin/superadmin
       if (['admin', 'superadmin'].includes(req.user.role)) {
         return next();
       }
-      
+
       // Check if user owns the resource
       if (resource.user && resource.user.toString() === req.user.id) {
         return next();
       }
-      
+
       // Check for createdBy field
       if (resource.createdBy && resource.createdBy.toString() === req.user.id) {
         return next();
       }
-      
+
       return next(new AppError('You do not have permission to access this resource', 403));
     } catch (error) {
       next(error);
     }
   };
+};
+
+// Identify user or guest - allowing both
+exports.identify = async (req, res, next) => {
+  try {
+    // 1) Try to get token
+    let token;
+    if (
+      req.headers.authorization &&
+      req.headers.authorization.startsWith('Bearer')
+    ) {
+      token = req.headers.authorization.split(' ')[1];
+    } else if (req.cookies.jwt) {
+      token = req.cookies.jwt;
+    }
+
+    if (token) {
+      // 2) Verification token
+      try {
+        const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
+        const currentUser = await User.findById(decoded.id);
+        
+        if (currentUser && currentUser.isActive && !currentUser.changedPasswordAfter(decoded.iat)) {
+          req.user = currentUser;
+          return next();
+        }
+      } catch (err) {
+        // Token invalid, continue to guest check
+      }
+    }
+
+    // 3) Check for Guest ID in headers
+    let guestId = req.headers['x-guest-id'];
+    if (guestId) {
+      guestId = guestId.toString().trim();
+      console.log('Identify Middleware - Guest detected:', guestId);
+      req.guestId = guestId;
+      return next();
+    }
+
+    // 4) If neither authentication nor guest ID is present
+    return next(new AppError('Please provide authentication or a guest ID.', 401));
+  } catch (error) {
+    next(error);
+  }
 };

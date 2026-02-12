@@ -8,10 +8,16 @@ const {
   getRevenueOverview,
   getRevenueBreakdown,
   getUserGrowthProgress,
+  setMonthlyTarget,
+  getMonthlyTarget,
+  getRecentOrders,
+  getRecentUsers,
+  getPerformanceMetrics,
 } = require("../controllers/admin/adminController");
 
 const {
   getAllProducts,
+  getProduct,
   createProduct,
   updateProduct,
   deleteProduct,
@@ -53,6 +59,16 @@ const {
   getOrderTimeline,
   generateInvoice,
   sendInvoiceEmail,
+  // Shiprocket integration
+  createShipment,
+  getAvailableCouriers,
+  generateAWB,
+  schedulePickup,
+  trackShipment,
+  cancelShipment,
+  printShippingLabel,
+  getShippingChargesEstimate,
+  generateManifest,
 } = require("../controllers/admin/orderController");
 
 const {
@@ -83,6 +99,40 @@ const {
   exportStockReport,
 } = require("../controllers/admin/stockController");
 
+const {
+  getNotifications,
+  getUnreadCount,
+  getRecentNotifications,
+  markAsRead,
+  markAllAsRead,
+  deleteNotification,
+  clearAllNotifications,
+  getNotification,
+} = require("../controllers/admin/notificationController");
+
+const {
+  getProfile,
+  updateProfile,
+  updatePassword,
+  uploadProfileImage,
+  deleteProfileImage,
+  getActivityLog,
+} = require("../controllers/admin/profileController");
+
+const {
+  getAllReviews,
+  updateReviewStatus,
+  deleteReview: deleteAdminReview,
+} = require("../controllers/admin/reviewController");
+
+const {
+  getAllPromoCodes,
+  createPromoCode,
+  updatePromoCode,
+  deletePromoCode,
+  getActivePromoCodes,
+} = require("../controllers/admin/promoCodeController");
+
 const { protect, restrictTo, isAdmin } = require("../middleware/auth");
 const {
   uploadProductImages: uploadProductImagesMiddleware,
@@ -92,7 +142,7 @@ const {
 const { generatePresignedUrl } = require("../controllers/admin/s3Controller");
 
 const router = express.Router();
-
+router.get("/categories", getAllCategories);
 // All admin routes require authentication and admin role
 router.use(protect);
 router.use(restrictTo("admin", "superadmin"));
@@ -101,6 +151,11 @@ router.use(restrictTo("admin", "superadmin"));
 router.get("/dashboard/stats", getDashboardStats);
 router.get("/dashboard/revenue-overview", getRevenueOverview);
 router.get("/dashboard/user-growth-progress", getUserGrowthProgress);
+router.get("/dashboard/monthly-target", getMonthlyTarget);
+router.post("/dashboard/set-target", setMonthlyTarget);
+router.get("/dashboard/recent-orders", getRecentOrders);
+router.get("/dashboard/recent-users", getRecentUsers);
+router.get("/dashboard/performance-metrics", getPerformanceMetrics);
 router.get("/activities", getAdminActivities);
 router.get("/health", getSystemHealth);
 router.get("/users/stats", getUserStatistics);
@@ -121,10 +176,10 @@ router.patch("/products/images/:imageId/set-primary", setPrimaryImage);
 router.delete("/products/images/:imageId", deleteProductImage);
 router.get("/products/:id/stock-history", getStockHistory);
 router.patch("/products/:id/stock", updateStock);
-router.route("/products/:id").patch(updateProduct).delete(deleteProduct);
+router.route("/products/:id").get(getProduct).patch(updateProduct).delete(deleteProduct);
 
 // Category routes
-router.get("/categories", getAllCategories);
+
 router.get("/categories/tree", getCategoryTree);
 router.post("/categories", createCategory);
 router.route("/categories/:id").patch(updateCategory).delete(deleteCategory);
@@ -154,6 +209,18 @@ router.post("/orders/:id/send-invoice", sendInvoiceEmail); // Added
 router.patch("/orders/:id/status", updateOrderStatus);
 router.patch("/orders/:id/shipping-status", updateShippingStatus);
 router.patch("/orders/:id/payment-status", updatePaymentStatus);
+
+// Shiprocket integration routes
+router.post("/orders/:id/create-shipment", createShipment);
+router.get("/orders/:id/available-couriers", getAvailableCouriers);
+router.post("/orders/:id/generate-awb", generateAWB);
+router.post("/orders/:id/schedule-pickup", schedulePickup);
+router.get("/orders/:id/track-shipment", trackShipment);
+router.post("/orders/:id/cancel-shipment", cancelShipment);
+router.get("/orders/:id/shipping-label", printShippingLabel);
+router.post("/orders/:id/shipping-charges", getShippingChargesEstimate);
+router.post("/orders/generate-manifest", generateManifest);
+
 // Coupon routes
 router.get("/coupons", getAllCoupons);
 router.post("/coupons/validate", validateCoupon);
@@ -189,7 +256,38 @@ router.get("/stock/export", exportStockReport);
 
 
 
+// Notification routes
+router.get("/notifications", getNotifications);
+router.get("/notifications/unread-count", getUnreadCount);
+router.get("/notifications/recent", getRecentNotifications);
+router.patch("/notifications/mark-all-read", markAllAsRead);
+router.delete("/notifications/clear-all", clearAllNotifications);
+router.get("/notifications/:id", getNotification);
+router.patch("/notifications/:id/read", markAsRead);
+router.delete("/notifications/:id", deleteNotification);
+
+// Profile routes
+router.get("/profile", getProfile);
+router.patch("/profile", updateProfile);
+router.patch("/profile/password", updatePassword);
+router.post("/profile/image", uploadProfileImage);
+router.delete("/profile/image", deleteProfileImage);
+router.get("/profile/activity", getActivityLog);
+
 //aws routes
 router.post("/s3/presigned-url", generatePresignedUrl);
+
+// Review management
+// Review management
+router.get("/reviews", getAllReviews);
+router.patch("/reviews/:id/status", updateReviewStatus);
+router.delete("/reviews/:id", deleteAdminReview);
+
+// Promo code routes
+router.get("/promo-codes", getAllPromoCodes);
+router.post("/promo-codes", createPromoCode);
+router.patch("/promo-codes/:id", updatePromoCode);
+router.delete("/promo-codes/:id", deletePromoCode);
+router.get("/public/promo-codes", getActivePromoCodes); // Public exposed via admin router but actually used by client if needed, or I'll move it.
 
 module.exports = router;

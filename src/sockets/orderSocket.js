@@ -1,5 +1,7 @@
 const socketIO = require('socket.io');
 const Order = require('../models/Order');
+const Notification = require('../models/Notification');
+const Product = require('../models/Product');
 
 let io;
 const adminSockets = new Map(); // Map to store admin socket connections
@@ -7,20 +9,29 @@ const adminSockets = new Map(); // Map to store admin socket connections
 exports.initializeSocket = (server) => {
   io = socketIO(server, {
     cors: {
-      origin: process.env.CLIENT_URL || 'http://localhost:3000',
+      origin: [
+        process.env.CLIENT_URL,
+        'http://localhost:3000',
+        'http://localhost:3001',
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://localhost:5175'
+      ].filter(Boolean),
       methods: ['GET', 'POST'],
       credentials: true
     }
   });
   
   io.on('connection', (socket) => {
-    console.log('New client connected:', socket.id);
+    console.log('⚡ New socket connection established:', socket.id);
+    console.log('Handshake auth:', socket.handshake.auth);
     
     // Admin joins admin room
     socket.on('admin-join', (userId) => {
+      console.log(`🔑 Admin Join Attempt: UserID ${userId} on Socket ${socket.id}`);
       socket.join('admin-room');
       adminSockets.set(userId, socket.id);
-      console.log(`Admin ${userId} joined admin room`);
+      console.log(`✅ Admin ${userId} successfully joined admin-room`);
     });
     
     // User joins their personal room
@@ -95,32 +106,35 @@ exports.getIO = () => {
 exports.notifyNewOrder = async (orderId) => {
   try {
     const order = await Order.findById(orderId)
-      .populate('user', 'firstName lastName');
-    
+      .populate('user', 'firstName lastName')
+      .populate('items');
+
     if (!order) return;
-    
-    const notification = {
+
+    const productName = order.items && order.items.length > 0 ? order.items[0].productName : 'items';
+    const orderDate = new Date(order.createdAt || Date.now());
+    const dateStr = orderDate.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const timeStr = orderDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const notificationData = {
       type: 'new_order',
       orderId: order.orderId,
-      userId: order.user._id,
-      userName: `${order.user.firstName} ${order.user.lastName}`,
+      orderDbId: order._id,
+      userId: order.user?._id,
+      userName: order.user ? `${order.user.firstName} ${order.user.lastName}` : 'Guest',
+      productName,
+      message: `${order.user?.firstName || 'A customer'} bought ${productName}${order.items?.length > 1 ? ` and others` : ''} on ${dateStr} at ${timeStr}`,
       total: order.grandTotal,
-      itemsCount: order.items.length,
+      itemsCount: order.items?.length || 0,
       timestamp: new Date()
     };
-    
-    exports.emitOrderNotification('new_order', notification);
-    
-    // Also log to database for persistence
-    await Notification.create({
-      type: 'admin_notification',
-      title: 'New Order Received',
-      message: `New order ${order.orderId} from ${order.user.firstName}`,
-      data: notification,
-      recipients: ['admin'],
-      readBy: []
-    });
-    
+
+    // Emit real-time notification
+    exports.emitOrderNotification('new_order', notificationData);
+
+    // Persist notification to database
+    await Notification.createOrderNotification(order, 'new_order');
+
   } catch (error) {
     console.error('Error notifying new order:', error);
   }
@@ -130,10 +144,10 @@ exports.notifyNewOrder = async (orderId) => {
 exports.notifyLowStock = async (productId) => {
   try {
     const product = await Product.findById(productId);
-    
+
     if (!product) return;
-    
-    const notification = {
+
+    const notificationData = {
       type: 'low_stock',
       productId: product._id,
       productName: product.name,
@@ -142,9 +156,13 @@ exports.notifyLowStock = async (productId) => {
       threshold: product.lowStockThreshold,
       timestamp: new Date()
     };
-    
-    exports.emitOrderNotification('low_stock_alert', notification);
-    
+
+    // Emit real-time notification
+    exports.emitOrderNotification('low_stock_alert', notificationData);
+
+    // Persist notification to database
+    await Notification.createStockAlert(product, 'low_stock');
+
   } catch (error) {
     console.error('Error notifying low stock:', error);
   }
