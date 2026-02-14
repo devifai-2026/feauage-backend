@@ -4,20 +4,26 @@ const {
   handlePaymentCallback,
   verifyPayment,
   getPaymentStatus,
-  createRefund
+  createRefund,
+  processS2SCardPayment,
+  handleS2SCallback
 } = require('../controllers/paymentController');
 const { protect, restrictTo } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Public route - Payment callback (Razorpay redirects here after payment)
+// Public routes - Payment callbacks (Razorpay redirects here after payment)
 router.get('/callback', handlePaymentCallback);
+router.post('/s2s-callback', handleS2SCallback);
 
 // Protected routes - require authentication
 router.use(protect);
 
 // Create payment link (returns URL to redirect user to Razorpay)
 router.post('/create-payment-link', createPaymentLink);
+
+// Process card payment via S2S API
+router.post('/process-card', processS2SCardPayment);
 
 // Verify Razorpay payment (manual verification if needed)
 router.post('/verify', verifyPayment);

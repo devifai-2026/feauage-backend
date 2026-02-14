@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const axios = require('axios');
 const Order = require('../models/Order');
 const OrderItem = require('../models/OrderItem');
 const OrderAddress = require('../models/OrderAddress');
@@ -393,6 +394,272 @@ exports.createRefund = catchAsync(async (req, res, next) => {
     console.error('Refund creation failed:', error);
     return next(new AppError('Refund creation failed', 500));
   }
+});
+
+// @desc    Process card payment via Razorpay S2S API
+// @route   POST /api/v1/payments/process-card
+// @access  Private
+// NOTE: This endpoint handles raw card data. Never log card details.
+// For production, ensure PCI DSS SAQ-D compliance.
+exports.processS2SCardPayment = catchAsync(async (req, res, next) => {
+  const { orderId, razorpayOrderId, card, amount } = req.body;
+
+  // Validate inputs
+  if (!orderId && !razorpayOrderId) {
+    return next(new AppError('Order ID or Razorpay Order ID is required', 400));
+  }
+  if (!card || !card.number || !card.expiry_month || !card.expiry_year || !card.cvv || !card.name) {
+    return next(new AppError('Complete card details are required', 400));
+  }
+
+  // Find order if orderId provided
+  let order = null;
+  if (orderId) {
+    order = await Order.findOne({ orderId, user: req.user.id });
+    if (!order) {
+      order = await Order.findById(orderId);
+      if (order && order.user.toString() !== req.user.id) order = null;
+    }
+  }
+
+  // Determine totals and Razorpay Order ID
+  let finalRazorpayOrderId = razorpayOrderId || order?.razorpayOrderId;
+  let finalAmount = amount || order?.grandTotal;
+
+  if (!finalAmount && order) finalAmount = order.grandTotal;
+
+  if (!finalAmount) {
+    return next(new AppError('Amount is required if order is not yet created', 400));
+  }
+
+  // Ensure Razorpay order exists if not provided
+  if (!finalRazorpayOrderId) {
+    try {
+      const rzpOrder = await razorpay.orders.create({
+        amount: Math.round(finalAmount * 100),
+        currency: 'INR',
+        receipt: orderId || `temp_${Date.now()}`,
+        notes: { orderId: orderId || 'new_order', userId: req.user.id }
+      });
+      finalRazorpayOrderId = rzpOrder.id;
+      if (order) {
+        order.razorpayOrderId = finalRazorpayOrderId;
+        await order.save();
+      }
+    } catch (err) {
+      console.error('Razorpay order creation failed:', err);
+      return next(new AppError('Failed to create payment order', 500));
+    }
+  }
+
+  // Get user details
+  const user = await User.findById(req.user.id);
+
+  // Call Razorpay S2S API
+  // Using the standard v1/payments endpoint for direct card processing
+  const s2sPayload = {
+    amount: Math.round(finalAmount * 100),
+    currency: 'INR',
+    email: user.email,
+    contact: user.phone || '',
+    order_id: finalRazorpayOrderId,
+    method: 'card',
+    card: {
+      number: card.number.replace(/\s/g, ''),
+      expiry_month: card.expiry_month,
+      expiry_year: card.expiry_year,
+      cvv: card.cvv,
+      name: card.name,
+    },
+    callback_url: `${process.env.SERVER_URL || 'http://localhost:5001'}/api/v1/payments/s2s-callback?orderId=${orderId || 'new_order'}`
+  };
+
+  try {
+    const params = new URLSearchParams();
+    params.append('amount', Math.round(finalAmount * 100).toString());
+    params.append('currency', 'INR');
+    params.append('email', user.email);
+    params.append('contact', user.phone || '');
+    params.append('order_id', finalRazorpayOrderId);
+    params.append('method', 'card');
+    params.append('card[number]', card.number.replace(/\s/g, ''));
+    params.append('card[expiry_month]', card.expiry_month);
+    params.append('card[expiry_year]', card.expiry_year);
+    params.append('card[cvv]', card.cvv);
+    params.append('card[name]', card.name);
+    params.append('callback_url', `${process.env.SERVER_URL || 'http://localhost:5001'}/api/v1/payments/s2s-callback?orderId=${orderId || 'new_order'}`);
+
+    const response = await axios.post(
+      'https://api.razorpay.com/v1/payments',
+      params.toString(),
+      {
+        auth: {
+          username: (process.env.RAZORPAY_KEY_ID || '').trim(),
+          password: (process.env.RAZORPAY_KEY_SECRET || '').trim()
+        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      }
+    );
+
+    const paymentId = response.data.razorpay_payment_id || response.data.id;
+
+    // Store payment ID
+    if (order) {
+      order.razorpayPaymentId = paymentId;
+      await order.save();
+    }
+
+    // Check if 3DS redirect is required
+    // Razorpay S2S returns next actions in the 'next' array or 'redirect' field
+    const nextActions = response.data.next || [];
+    const redirectLink = response.data.links?.redirect || response.data.redirect_url;
+    const redirectAction = nextActions.find(a => typeof a === 'string' ? a.includes('redirect') : a.action === 'redirect');
+    const redirectUrl = redirectLink || (typeof redirectAction === 'string' ? redirectAction : redirectAction?.url);
+
+    if (redirectUrl) {
+      // 3DS required - return redirect URL for frontend popup
+      if (order) {
+        order.paymentStatus = 'processing';
+        await order.save();
+      }
+
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          requiresRedirect: true,
+          redirectUrl,
+          razorpayPaymentId: paymentId,
+          razorpayOrderId: finalRazorpayOrderId
+        }
+      });
+    }
+
+    // No 3DS - payment may be authorized or captured directly
+    // Fetch payment to check status
+    const paymentDetails = await razorpay.payments.fetch(paymentId);
+
+    if (paymentDetails.status === 'authorized') {
+      // Capture the payment
+      await razorpay.payments.capture(paymentId, Math.round(finalAmount * 100), 'INR');
+    }
+
+    // Verify signature
+    const body = finalRazorpayOrderId + '|' + paymentId;
+    const expectedSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(body)
+      .digest('hex');
+
+    // Update order as paid if it exists
+    if (order) {
+      order.paymentStatus = 'paid';
+      order.razorpaySignature = expectedSignature;
+      order.status = 'confirmed';
+      await order.save();
+    }
+
+    // Emit payment notification if order exists
+    if (order) {
+      emitOrderNotification('payment_received', {
+        orderId: order.orderId,
+        paymentId,
+        amount: order.grandTotal,
+        userId: order.user,
+        userName: user.fullName || `${user.firstName} ${user.lastName}`
+      });
+
+      // Create Shiprocket shipment asynchronously
+      shippingService.processShipmentForOrder(order._id).catch(err => {
+        console.error('Failed to create Shiprocket shipment:', err.message);
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        requiresRedirect: false,
+        razorpayPaymentId: paymentId,
+        razorpayOrderId: finalRazorpayOrderId,
+        razorpaySignature: expectedSignature,
+        order
+      }
+    });
+
+  } catch (error) {
+    console.error('Razorpay S2S payment failed:', error.response?.data || error.message);
+    
+    let errorMsg = 'Payment processing failed';
+    if (error.response?.data) {
+      if (typeof error.response.data === 'string') {
+        errorMsg = `Gateway error: ${error.response.statusText || 'Not Found'}`;
+      } else if (error.response.data.error?.description) {
+        errorMsg = error.response.data.error.description;
+      }
+    } else if (error.message) {
+      errorMsg = error.message;
+    }
+    
+    return next(new AppError(errorMsg, 400));
+  }
+});
+
+// @desc    Handle 3DS callback after S2S card payment
+// @route   POST /api/v1/payments/s2s-callback
+// @access  Public (called by Razorpay after 3DS)
+exports.handleS2SCallback = catchAsync(async (req, res, next) => {
+  const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
+  const { orderId } = req.query;
+
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+  // Find order
+  const order = await Order.findOne({ orderId });
+  if (!order) {
+    return res.redirect(`${frontendUrl}/payment-status?status=failed&error=Order not found`);
+  }
+
+  // Verify signature
+  if (razorpay_payment_id && razorpay_order_id && razorpay_signature) {
+    const body = razorpay_order_id + '|' + razorpay_payment_id;
+    const expectedSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(body)
+      .digest('hex');
+
+    if (razorpay_signature === expectedSignature) {
+      // Payment verified
+      order.paymentStatus = 'paid';
+      order.razorpayPaymentId = razorpay_payment_id;
+      order.razorpaySignature = razorpay_signature;
+      order.status = 'confirmed';
+      await order.save();
+
+      // Get user for notification
+      const user = await User.findById(order.user);
+
+      // Emit payment notification
+      emitOrderNotification('payment_received', {
+        orderId: order.orderId,
+        paymentId: razorpay_payment_id,
+        amount: order.grandTotal,
+        userId: order.user,
+        userName: user?.fullName || 'Customer'
+      });
+
+      // Create Shiprocket shipment asynchronously
+      shippingService.processShipmentForOrder(order._id).catch(err => {
+        console.error('Failed to create Shiprocket shipment:', err.message);
+      });
+
+      return res.redirect(`${frontendUrl}/payment-status?status=success&orderId=${order.orderId}`);
+    }
+  }
+
+  // Payment failed or signature mismatch
+  order.paymentStatus = 'failed';
+  await order.save();
+
+  return res.redirect(`${frontendUrl}/payment-status?status=failed&orderId=${order.orderId}`);
 });
 
 // Helper functions for webhook handling
