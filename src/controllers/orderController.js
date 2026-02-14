@@ -103,10 +103,29 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
 
     const razorpayOrder = await razorpay.orders.create(options);
 
+    // 4) Ensure Razorpay Customer exists for 'Saved Cards' functionality
+    let razorpayCustomerId = user.razorpayCustomerId;
+    if (!razorpayCustomerId) {
+      try {
+        const customer = await razorpay.customers.create({
+          name: user.fullName || `${user.firstName} ${user.lastName}`,
+          email: user.email,
+          contact: user.phone || undefined,
+        });
+        razorpayCustomerId = customer.id;
+        user.razorpayCustomerId = razorpayCustomerId;
+        await user.save({ validateBeforeSave: false });
+      } catch (err) {
+        console.error('Razorpay Customer creation failed:', err.message);
+        // We don't fail the whole request if customer creation fails
+      }
+    }
+
     res.status(200).json({
       status: 'success',
       data: {
         razorpayOrder,
+        razorpayCustomerId,
         totals: {
           subtotal: cart.cartTotal,
           discount: discountAmount,

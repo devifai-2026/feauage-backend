@@ -206,6 +206,20 @@ exports.register = catchAsync(async (req, res, next) => {
   // Update user with cart and wishlist references
   newUser.cart = cart._id;
   newUser.wishlist = wishlist._id;
+  
+  // Create Razorpay Customer for 'Saved Cards' functionality
+  try {
+    const razorpay = require('../configs/razorpay');
+    const customer = await razorpay.customers.create({
+      name: `${newUser.firstName} ${newUser.lastName}`,
+      email: newUser.email,
+      contact: newUser.phone || undefined
+    });
+    newUser.razorpayCustomerId = customer.id;
+  } catch (err) {
+    console.error('Razorpay Customer creation failed during registration:', err.message);
+  }
+
   await newUser.save();
 
   // Convert guest user to registered user if guestId provided

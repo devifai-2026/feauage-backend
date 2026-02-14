@@ -152,7 +152,8 @@ const userSchema = new mongoose.Schema({
   lockUntil: {
     type: Date,
     select: false
-  }
+  },
+  razorpayCustomerId: String
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
