@@ -151,8 +151,8 @@ exports.updateOrderStatus = catchAsync(async (req, res, next) => {
     });
   }
   
-  // If order is cancelled and payment was made, initiate refund
-  if (status === 'cancelled' && order.paymentStatus === 'paid') {
+  // If order is cancelled, return stock for items
+  if (status === 'cancelled' && previousStatus !== 'cancelled') {
     // Return stock for cancelled items
     const orderItems = await OrderItem.find({ order: order._id });
     
@@ -613,8 +613,8 @@ exports.bulkUpdateOrders = catchAsync(async (req, res, next) => {
       userAgent: req.get('user-agent')
     });
     
-    // If order is cancelled and payment was made, return stock
-    if (status === 'cancelled' && order.paymentStatus === 'paid') {
+    // If order is cancelled, return stock
+    if (status === 'cancelled' && previousStatus !== 'cancelled') {
       const orderItems = await OrderItem.find({ order: orderId });
       
       for (const item of orderItems) {
