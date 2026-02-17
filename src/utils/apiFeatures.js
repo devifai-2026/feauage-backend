@@ -8,7 +8,7 @@ class APIFeatures {
 
   filter() {
     const queryObj = { ...this.queryString };
-    const excludedFields = ['page', 'sort', 'limit', 'fields'];
+    const excludedFields = ['page', 'sort', 'limit', 'fields', 'search'];
     excludedFields.forEach(el => delete queryObj[el]);
 
     // Remove empty strings, null, and undefined values from queryObj
@@ -53,6 +53,23 @@ class APIFeatures {
     console.log("Final filter query:", this.filterQuery);
     this.query = this.query.find(this.filterQuery);
 
+    return this;
+  }
+
+  search() {
+    if (this.queryString.search) {
+      const searchTerm = this.queryString.search;
+      const searchQuery = {
+        $or: [
+          { name: { $regex: searchTerm, $options: 'i' } },
+          { sku: { $regex: searchTerm, $options: 'i' } },
+          { description: { $regex: searchTerm, $options: 'i' } }
+        ]
+      };
+      
+      this.filterQuery = { ...this.filterQuery, ...searchQuery };
+      this.query = this.query.find(searchQuery);
+    }
     return this;
   }
 
