@@ -9,7 +9,23 @@ const bannerImageSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
-  subheader: {
+  // Per-image text content
+  title: {
+    type: String,
+    trim: true,
+    maxlength: [200, 'Title cannot exceed 200 characters']
+  },
+  subtitle: {
+    type: String,
+    trim: true,
+    maxlength: [200, 'Subtitle cannot exceed 200 characters']
+  },
+  description: {
+    type: String,
+    trim: true,
+    maxlength: [500, 'Description cannot exceed 500 characters']
+  },
+  subheader: { // Keep for backward compatibility, same as subtitle
     type: String,
     default: '',
     maxlength: [300, 'Subheader cannot exceed 300 characters']

@@ -42,70 +42,70 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
     const currentUserId = req.user.id;
 
     // 1. Get all stats in parallel for better performance
-      // Get current target for the logged-in user (defaults to monthly or specified by query)
-      const targetPeriod = req.query.targetPeriod || 'monthly';
-      let targetStartDate, targetEndDate;
-      const now = new Date(nowIST);
-      
-      if (targetPeriod === 'monthly') {
-        targetStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        targetEndDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-      } else if (targetPeriod === 'quarterly') {
-        const quarter = Math.floor(now.getMonth() / 3);
-        targetStartDate = new Date(now.getFullYear(), quarter * 3, 1);
-        targetEndDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0, 23, 59, 59, 999);
-      } else if (targetPeriod === 'half-yearly') {
-        const half = now.getMonth() < 6 ? 0 : 6;
-        targetStartDate = new Date(now.getFullYear(), half, 1);
-        targetEndDate = new Date(now.getFullYear(), half + 6, 0, 23, 59, 59, 999);
-      } else if (targetPeriod === 'annually' || targetPeriod === 'yearly') {
-        targetStartDate = new Date(now.getFullYear(), 0, 1);
-        targetEndDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-      }
+    // Get current target for the logged-in user (defaults to monthly or specified by query)
+    const targetPeriod = req.query.targetPeriod || 'monthly';
+    let targetStartDate, targetEndDate;
+    const now = new Date(nowIST);
 
-      const currentPeriodTargetPromise = Target.findOne({
-        userId: currentUserId,
-        targetType: 'revenue',
-        period: targetPeriod,
-        isActive: true,
-        startDate: { $lte: targetEndDate },
-        endDate: { $gte: targetStartDate },
-        status: 'active'
-      }).sort({ createdAt: -1 });
+    if (targetPeriod === 'monthly') {
+      targetStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      targetEndDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    } else if (targetPeriod === 'quarterly') {
+      const quarter = Math.floor(now.getMonth() / 3);
+      targetStartDate = new Date(now.getFullYear(), quarter * 3, 1);
+      targetEndDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0, 23, 59, 59, 999);
+    } else if (targetPeriod === 'half-yearly') {
+      const half = now.getMonth() < 6 ? 0 : 6;
+      targetStartDate = new Date(now.getFullYear(), half, 1);
+      targetEndDate = new Date(now.getFullYear(), half + 6, 0, 23, 59, 59, 999);
+    } else if (targetPeriod === 'annually' || targetPeriod === 'yearly') {
+      targetStartDate = new Date(now.getFullYear(), 0, 1);
+      targetEndDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+    }
 
-      const [
-        totalUsers,
-        totalOrders,
-        totalProducts,
-        totalRevenueAllTime,
-        totalRevenueLast30Days,
-        todayRevenue,
-        revenuePrevious30Days,
-        todayOrders,
-        pendingOrders,
-        deliveredOrders,
-        totalOrdersPrevious30Days,
-        newUsersLast30Days,
-        newUsersPrevious30Days,
-        currentMonthTarget,
-        analyticsData
-      ] = await Promise.all([
-        User.countDocuments({ isActive: true, role: { $ne: 'admin' } }),
-        Order.countDocuments(),
-        Product.countDocuments({ isActive: true }),
-        Order.aggregate([{ $match: { status: 'delivered' } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
-        Order.aggregate([{ $match: { status: 'delivered', createdAt: { $gte: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
-        Order.aggregate([{ $match: { status: 'delivered', createdAt: { $gte: today } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
-        Order.aggregate([{ $match: { status: 'delivered', createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
-        Order.countDocuments({ createdAt: { $gte: today } }),
-        Order.countDocuments({ status: 'pending' }),
-        Order.countDocuments({ status: 'delivered' }),
-        Order.countDocuments({ createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } }),
-        User.countDocuments({ createdAt: { $gte: thirtyDaysAgo }, isActive: true, role: { $ne: 'admin' } }),
-        User.countDocuments({ createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo }, isActive: true, role: { $ne: 'admin' } }),
-        currentPeriodTargetPromise,
-        Analytics.aggregate([{ $match: { timestamp: { $gte: thirtyDaysAgo }, type: 'page_view' } }, { $group: { _id: '$sessionId', firstView: { $min: '$timestamp' }, lastView: { $max: '$timestamp' }, pageViews: { $sum: 1 } } }])
-      ]);
+    const currentPeriodTargetPromise = Target.findOne({
+      userId: currentUserId,
+      targetType: 'revenue',
+      period: targetPeriod,
+      isActive: true,
+      startDate: { $lte: targetEndDate },
+      endDate: { $gte: targetStartDate },
+      status: 'active'
+    }).sort({ createdAt: -1 });
+
+    const [
+      totalUsers,
+      totalOrders,
+      totalProducts,
+      totalRevenueAllTime,
+      totalRevenueLast30Days,
+      todayRevenue,
+      revenuePrevious30Days,
+      todayOrders,
+      pendingOrders,
+      deliveredOrders,
+      totalOrdersPrevious30Days,
+      newUsersLast30Days,
+      newUsersPrevious30Days,
+      currentMonthTarget,
+      analyticsData
+    ] = await Promise.all([
+      User.countDocuments({ isActive: true, role: { $ne: 'admin' } }),
+      Order.countDocuments(),
+      Product.countDocuments({ isActive: true }),
+      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing'] } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing'] }, createdAt: { $gte: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing'] }, createdAt: { $gte: today } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing'] }, createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+      Order.countDocuments({ createdAt: { $gte: today } }),
+      Order.countDocuments({ status: 'pending' }),
+      Order.countDocuments({ status: 'delivered' }),
+      Order.countDocuments({ createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } }),
+      User.countDocuments({ createdAt: { $gte: thirtyDaysAgo }, isActive: true, role: { $ne: 'admin' } }),
+      User.countDocuments({ createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo }, isActive: true, role: { $ne: 'admin' } }),
+      currentPeriodTargetPromise,
+      Analytics.aggregate([{ $match: { timestamp: { $gte: thirtyDaysAgo }, type: 'page_view' } }, { $group: { _id: '$sessionId', firstView: { $min: '$timestamp' }, lastView: { $max: '$timestamp' }, pageViews: { $sum: 1 } } }])
+    ]);
 
     // 2. Calculate growth percentages
     const revenueLast30DaysValue = totalRevenueLast30Days[0]?.total || 0;
@@ -161,7 +161,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
       monthlyRevenue = await Order.aggregate([
         {
           $match: {
-            status: 'delivered',
+            status: { $in: ['delivered', 'shipped', 'processing'] },
             createdAt: {
               $gte: currentYearStart,
               $lt: currentYearEnd
@@ -227,7 +227,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
       const currentMonthRevenueResult = await Order.aggregate([
         {
           $match: {
-            status: 'delivered',
+            status: { $in: ['delivered', 'shipped', 'processing'] },
             createdAt: {
               $gte: new Date(Date.UTC(currentYear, currentMonth, 0, 18, 30)),
               $lt: new Date(Date.UTC(currentYear, currentMonth + 1, 0, 18, 30))
@@ -245,7 +245,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
       const prevMonthRevenueResult = await Order.aggregate([
         {
           $match: {
-            status: 'delivered',
+            status: { $in: ['delivered', 'shipped', 'processing'] },
             createdAt: {
               $gte: new Date(Date.UTC(currentYear, currentMonth - 1, 0, 18, 30)),
               $lt: new Date(Date.UTC(currentYear, currentMonth, 0, 18, 30))
@@ -440,7 +440,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
         const actualRevenueForMonth = await Order.aggregate([
           {
             $match: {
-              status: 'delivered',
+              status: { $in: ['delivered', 'shipped', 'processing'] },
               createdAt: {
                 $gte: new Date(Date.UTC(year, month, 0, 18, 30)),
                 $lt: new Date(Date.UTC(year, month + 1, 0, 18, 30))
@@ -1973,7 +1973,7 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
         const revenueResult = await Order.aggregate([
           {
             $match: {
-              status: 'delivered',
+              status: { $in: ['delivered', 'shipped', 'processing'] },
               createdAt: {
                 $gte: monthStart,
                 $lt: monthEnd
@@ -2038,7 +2038,7 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
       const currentMonthRevenueResult = await Order.aggregate([
         {
           $match: {
-            status: 'delivered',
+            status: { $in: ['delivered', 'shipped', 'processing'] },
             createdAt: {
               $gte: currentMonthStart,
               $lt: currentMonthEnd
@@ -2078,7 +2078,7 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
         const prevRevenueResult = await Order.aggregate([
           {
             $match: {
-              status: 'delivered',
+              status: { $in: ['delivered', 'shipped', 'processing'] },
               createdAt: {
                 $gte: prevYearStart,
                 $lt: prevYearEnd
@@ -2111,7 +2111,7 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
         const prevRevenueResult = await Order.aggregate([
           {
             $match: {
-              status: 'delivered',
+              status: { $in: ['delivered', 'shipped', 'processing'] },
               createdAt: {
                 $gte: new Date(prevStartDate.getTime() - (5.5 * 60 * 60 * 1000)),
                 $lt: new Date(prevEndDate.getTime() - (5.5 * 60 * 60 * 1000))
@@ -2587,7 +2587,7 @@ exports.setMonthlyTarget = catchAsync(async (req, res, next) => {
     // Get period start and end dates
     const now = new Date();
     let startDate, endDate;
-    
+
     if (period === 'monthly') {
       startDate = new Date(now.getFullYear(), now.getMonth(), 1);
       endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -2648,7 +2648,7 @@ exports.setMonthlyTarget = catchAsync(async (req, res, next) => {
         const revenueData = await Order.aggregate([
           {
             $match: {
-              status: 'delivered',
+              status: { $in: ['delivered', 'shipped', 'processing'] },
               createdAt: { $gte: startDate, $lte: endDate }
             }
           },
@@ -2755,7 +2755,7 @@ exports.getMonthlyTarget = catchAsync(async (req, res, next) => {
       const revenueData = await Order.aggregate([
         {
           $match: {
-            status: 'delivered',
+            status: { $in: ['delivered', 'shipped', 'processing'] },
             createdAt: { $gte: startDate, $lte: endDate }
           }
         },

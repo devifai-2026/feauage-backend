@@ -138,8 +138,10 @@ const {
   uploadProductImages: uploadProductImagesMiddleware,
   uploadBannerImage: uploadBannerImageMiddleware,
   uploadCategoryImage: uploadCategoryImageMiddleware,
+  uploadGenericSingle,
+  uploadGenericMultiple,
 } = require("../middleware/upload");
-const { generatePresignedUrl } = require("../controllers/admin/s3Controller");
+const { uploadImage, uploadImages } = require("../controllers/admin/s3Controller");
 
 const router = express.Router();
 router.get("/categories", getAllCategories);
@@ -274,8 +276,9 @@ router.post("/profile/image", uploadProfileImage);
 router.delete("/profile/image", deleteProfileImage);
 router.get("/profile/activity", getActivityLog);
 
-//aws routes
-router.post("/s3/presigned-url", generatePresignedUrl);
+// Upload routes (S3)
+router.post("/upload", uploadGenericSingle, uploadImage);
+router.post("/upload-multiple", uploadGenericMultiple, uploadImages);
 
 // Review management
 // Review management
