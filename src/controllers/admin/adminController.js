@@ -70,7 +70,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
       isActive: true,
       startDate: { $lte: targetEndDate },
       endDate: { $gte: targetStartDate },
-      status: 'active'
+      status: { $in: ['active', 'completed'] }
     }).sort({ createdAt: -1 });
 
     const [
@@ -93,10 +93,10 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
       User.countDocuments({ isActive: true, role: { $ne: 'admin' } }),
       Order.countDocuments(),
       Product.countDocuments({ isActive: true }),
-      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing'] } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
-      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing'] }, createdAt: { $gte: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
-      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing'] }, createdAt: { $gte: today } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
-      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing'] }, createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing', 'confirmed'] } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing', 'confirmed'] }, createdAt: { $gte: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing', 'confirmed'] }, createdAt: { $gte: today } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
+      Order.aggregate([{ $match: { status: { $in: ['delivered', 'shipped', 'processing', 'confirmed'] }, createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$grandTotal' } } }]),
       Order.countDocuments({ createdAt: { $gte: today } }),
       Order.countDocuments({ status: 'pending' }),
       Order.countDocuments({ status: 'delivered' }),
@@ -161,7 +161,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
       monthlyRevenue = await Order.aggregate([
         {
           $match: {
-            status: { $in: ['delivered', 'shipped', 'processing'] },
+            status: { $in: ['delivered', 'shipped', 'processing', 'confirmed'] },
             createdAt: {
               $gte: currentYearStart,
               $lt: currentYearEnd
@@ -227,7 +227,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
       const currentMonthRevenueResult = await Order.aggregate([
         {
           $match: {
-            status: { $in: ['delivered', 'shipped', 'processing'] },
+            status: { $in: ['delivered', 'shipped', 'processing', 'confirmed'] },
             createdAt: {
               $gte: new Date(Date.UTC(currentYear, currentMonth, 0, 18, 30)),
               $lt: new Date(Date.UTC(currentYear, currentMonth + 1, 0, 18, 30))
@@ -245,7 +245,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
       const prevMonthRevenueResult = await Order.aggregate([
         {
           $match: {
-            status: { $in: ['delivered', 'shipped', 'processing'] },
+            status: { $in: ['delivered', 'shipped', 'processing', 'confirmed'] },
             createdAt: {
               $gte: new Date(Date.UTC(currentYear, currentMonth - 1, 0, 18, 30)),
               $lt: new Date(Date.UTC(currentYear, currentMonth, 0, 18, 30))
@@ -303,7 +303,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
 
             await Target.findByIdAndUpdate(currentMonthTarget._id, {
               currentValue: currentEarnings,
-              progress: newProgress,
+              progress: Math.min(Math.round(newProgress), 100),
               status: newStatus,
               lastUpdatedBy: currentUserId,
               updatedAt: nowIST
@@ -440,7 +440,7 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
         const actualRevenueForMonth = await Order.aggregate([
           {
             $match: {
-              status: { $in: ['delivered', 'shipped', 'processing'] },
+              status: { $in: ['delivered', 'shipped', 'processing', 'confirmed'] },
               createdAt: {
                 $gte: new Date(Date.UTC(year, month, 0, 18, 30)),
                 $lt: new Date(Date.UTC(year, month + 1, 0, 18, 30))
@@ -2613,7 +2613,6 @@ exports.setMonthlyTarget = catchAsync(async (req, res, next) => {
       period,
       startDate: { $lte: now },
       endDate: { $gte: now },
-      status: 'active',
       isActive: true
     });
 
@@ -2624,10 +2623,44 @@ exports.setMonthlyTarget = catchAsync(async (req, res, next) => {
       existingTarget.targetValue = targetValue;
       if (description) existingTarget.description = description;
       existingTarget.lastUpdatedBy = userId;
+      // Explicitly cap progress so validation passes (validators run before pre-save hook)
+      existingTarget.progress = Math.min(
+        Math.round((existingTarget.currentValue / targetValue) * 100),
+        100
+      );
       await existingTarget.save();
       target = existingTarget;
     } else {
-      // Create new target
+      // Calculate current value based on target type before creating
+      let currentValue = 0;
+      if (targetType === 'revenue') {
+        const revenueData = await Order.aggregate([
+          {
+            $match: {
+              status: { $in: ['delivered', 'shipped', 'processing', 'confirmed'] },
+              createdAt: { $gte: startDate, $lte: endDate }
+            }
+          },
+          { $group: { _id: null, total: { $sum: '$grandTotal' } } }
+        ]);
+        currentValue = revenueData[0]?.total || 0;
+      } else if (targetType === 'orders') {
+        currentValue = await Order.countDocuments({
+          createdAt: { $gte: startDate, $lte: endDate }
+        });
+      } else if (targetType === 'users') {
+        currentValue = await User.countDocuments({
+          createdAt: { $gte: startDate, $lte: endDate },
+          role: { $ne: 'admin' }
+        });
+      }
+
+      // Cap progress explicitly so validation passes (validators run before pre-save hook)
+      const progress = Math.min(
+        Math.round((currentValue / targetValue) * 100),
+        100
+      );
+
       target = await Target.create({
         userId,
         targetType,
@@ -2635,38 +2668,14 @@ exports.setMonthlyTarget = catchAsync(async (req, res, next) => {
         period,
         startDate,
         endDate,
-        currentValue: 0,
+        currentValue,
+        progress,
         status: 'active',
         isActive: true,
-        description: description || `Monthly ${targetType} target for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`,
+        description: description || `${period.charAt(0).toUpperCase() + period.slice(1)} ${targetType} target for ${now.toLocaleString('en-US', { month: 'long', year: 'numeric' })}`,
         createdBy: userId,
         lastUpdatedBy: userId
       });
-
-      // Calculate current value based on target type
-      if (targetType === 'revenue') {
-        const revenueData = await Order.aggregate([
-          {
-            $match: {
-              status: { $in: ['delivered', 'shipped', 'processing'] },
-              createdAt: { $gte: startDate, $lte: endDate }
-            }
-          },
-          { $group: { _id: null, total: { $sum: '$grandTotal' } } }
-        ]);
-        target.currentValue = revenueData[0]?.total || 0;
-      } else if (targetType === 'orders') {
-        target.currentValue = await Order.countDocuments({
-          createdAt: { $gte: startDate, $lte: endDate }
-        });
-      } else if (targetType === 'users') {
-        target.currentValue = await User.countDocuments({
-          createdAt: { $gte: startDate, $lte: endDate },
-          role: { $ne: 'admin' }
-        });
-      }
-
-      await target.save();
     }
 
     res.status(existingTarget ? 200 : 201).json({
@@ -2694,7 +2703,7 @@ exports.setMonthlyTarget = catchAsync(async (req, res, next) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to set monthly target',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: error.message
     });
   }
 });
@@ -2736,7 +2745,6 @@ exports.getMonthlyTarget = catchAsync(async (req, res, next) => {
       period,
       startDate: { $lte: now },
       endDate: { $gte: now },
-      status: 'active',
       isActive: true
     });
 

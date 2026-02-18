@@ -21,11 +21,11 @@ exports.initializeSocket = (server) => {
       credentials: true
     }
   });
-  
+
   io.on('connection', (socket) => {
     console.log('⚡ New socket connection established:', socket.id);
     console.log('Handshake auth:', socket.handshake.auth);
-    
+
     // Admin joins admin room
     socket.on('admin-join', (userId) => {
       console.log(`🔑 Admin Join Attempt: UserID ${userId} on Socket ${socket.id}`);
@@ -33,13 +33,13 @@ exports.initializeSocket = (server) => {
       adminSockets.set(userId, socket.id);
       console.log(`✅ Admin ${userId} successfully joined admin-room`);
     });
-    
+
     // User joins their personal room
     socket.on('user-join', (userId) => {
       socket.join(`user-${userId}`);
       console.log(`User ${userId} joined their room`);
     });
-    
+
     // Handle order updates from admin
     socket.on('order-update', (data) => {
       const { orderId, userId, status } = data;
@@ -49,7 +49,7 @@ exports.initializeSocket = (server) => {
         timestamp: new Date()
       });
     });
-    
+
     // Handle shipping updates
     socket.on('shipping-update', (data) => {
       const { orderId, userId, shippingStatus, trackingNumber } = data;
@@ -60,7 +60,7 @@ exports.initializeSocket = (server) => {
         timestamp: new Date()
       });
     });
-    
+
     socket.on('disconnect', () => {
       console.log('Client disconnected:', socket.id);
       // Remove from adminSockets map
@@ -72,7 +72,7 @@ exports.initializeSocket = (server) => {
       }
     });
   });
-  
+
   return io;
 };
 
@@ -83,7 +83,7 @@ exports.emitOrderNotification = (event, data) => {
       ...data,
       timestamp: new Date()
     });
-    
+
     // Also emit to specific user if needed
     if (data.userId) {
       io.to(`user-${data.userId}`).emit(`${event}_user`, {
@@ -123,7 +123,7 @@ exports.notifyNewOrder = async (orderId) => {
       userId: order.user?._id,
       userName: order.user ? `${order.user.firstName} ${order.user.lastName}` : 'Guest',
       productName,
-      message: `${order.user?.firstName || 'A customer'} bought ${productName}${order.items?.length > 1 ? ` and others` : ''} on ${dateStr} at ${timeStr}`,
+      message: `${order.user?.firstName || 'A customer'} placed a ${order.status} order for ${productName}${order.items?.length > 1 ? ` and others` : ''} on ${dateStr} at ${timeStr}`,
       total: order.grandTotal,
       itemsCount: order.items?.length || 0,
       timestamp: new Date()
@@ -172,9 +172,9 @@ exports.notifyLowStock = async (productId) => {
 exports.notifyPaymentReceived = async (orderId, paymentId) => {
   try {
     const order = await Order.findById(orderId);
-    
+
     if (!order) return;
-    
+
     const notification = {
       type: 'payment_received',
       orderId: order.orderId,
@@ -182,9 +182,9 @@ exports.notifyPaymentReceived = async (orderId, paymentId) => {
       amount: order.grandTotal,
       timestamp: new Date()
     };
-    
+
     exports.emitOrderNotification('payment_received', notification);
-    
+
   } catch (error) {
     console.error('Error notifying payment:', error);
   }
