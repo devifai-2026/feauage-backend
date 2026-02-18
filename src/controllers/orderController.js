@@ -21,11 +21,141 @@ const { TAX_RATES, SHIPPING } = require('../constants');
 // Initialize shipping service for tracking
 const shippingService = new ShippingService();
 
+// @desc    Initiate payment for an order (get Razorpay Order ID)
+// @route   POST /api/v1/orders/initiate-payment
+// @access  Private
+exports.initiatePayment = catchAsync(async (req, res, next) => {
+  const { shippingAddressId, couponCode, promoCode } = req.body;
+
+  // 1) Validation
+  if (!req.user || !req.user.id) {
+    return next(new AppError('You must be logged in to initiate an order.', 401));
+  }
+
+  // Get user and cart
+  const [user, cart] = await Promise.all([
+    User.findById(req.user.id),
+    Cart.findOne({ user: req.user.id }).populate({
+      path: 'items',
+      populate: {
+        path: 'product'
+      }
+    }).populate('couponApplied')
+  ]);
+
+  if (!cart || cart.items.length === 0) {
+    return next(new AppError('Your cart is empty', 400));
+  }
+
+  // 2) Resolve Addresses
+  let shippingAddress;
+  if (shippingAddressId) {
+    shippingAddress = user.addresses.find(addr => addr._id.toString() === shippingAddressId);
+  } else {
+    shippingAddress = user.addresses.find(addr => addr.isDefault) || user.addresses[0];
+  }
+
+  if (!shippingAddress) {
+    return next(new AppError('Please provide a shipping address to calculate totals', 400));
+  }
+
+  // 3) Calculate totals and check stock
+  if (!cart.cartTotal) await cart.calculateTotals();
+
+  let discountAmount = 0;
+  if (couponCode) {
+    const coupon = await Coupon.findOne({ code: couponCode.toUpperCase() });
+    if (coupon) {
+      const validation = coupon.validateCoupon(cart.cartTotal, req.user.id);
+      if (validation.isValid) discountAmount = validation.discountAmount;
+    }
+  } else if (cart.couponApplied) {
+    const validation = cart.couponApplied.validateCoupon(cart.cartTotal, req.user.id);
+    if (validation.isValid) discountAmount = validation.discountAmount;
+  }
+
+  if (promoCode) {
+    const promo = await PromoCode.findOne({ code: promoCode.toUpperCase(), isActive: true });
+    if (promo) discountAmount = Math.max(discountAmount, (cart.cartTotal * promo.discountPercentage) / 100);
+  }
+
+  const shippingCharge = calculateShippingCharge(shippingAddress.pincode, cart.cartTotal);
+  const taxableAmount = cart.cartTotal - discountAmount;
+  const tax = taxableAmount * TAX_RATES.GST;
+  const grandTotal = cart.cartTotal - discountAmount + shippingCharge + tax;
+
+  // Stock check
+  for (const cartItem of cart.items) {
+    const product = cartItem.product;
+    if (!product || product.stockQuantity < cartItem.quantity) {
+      return next(new AppError(`Insufficient stock for ${product?.name || 'product'}`, 400));
+    }
+  }
+
+  // Create Razorpay order
+  try {
+    const options = {
+      amount: Math.round(grandTotal * 100),
+      currency: 'INR',
+      receipt: `init_${Date.now()}`,
+      notes: { userId: req.user.id }
+    };
+
+    const razorpayOrder = await razorpay.orders.create(options);
+
+    // 4) Ensure Razorpay Customer exists for 'Saved Cards' functionality
+    let razorpayCustomerId = user.razorpayCustomerId;
+    if (!razorpayCustomerId) {
+      try {
+        const customer = await razorpay.customers.create({
+          name: user.fullName || `${user.firstName} ${user.lastName}`,
+          email: user.email,
+          contact: user.phone || undefined,
+        });
+        razorpayCustomerId = customer.id;
+        user.razorpayCustomerId = razorpayCustomerId;
+        await user.save({ validateBeforeSave: false });
+      } catch (err) {
+        console.error('Razorpay Customer creation failed:', err.message);
+        // We don't fail the whole request if customer creation fails
+      }
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        razorpayOrder,
+        razorpayCustomerId,
+        totals: {
+          subtotal: cart.cartTotal,
+          discount: discountAmount,
+          shippingCharge,
+          tax,
+          grandTotal
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Razorpay initiation failed:', error);
+    return next(new AppError('Failed to initiate payment gateway', 500));
+  }
+});
+
 // @desc    Create order from cart
 // @route   POST /api/v1/orders
 // @access  Private
 exports.createOrder = catchAsync(async (req, res, next) => {
-  const { shippingAddressId, billingAddressId, paymentMethod, couponCode, promoCode, shippingMethod } = req.body;
+  const { 
+    shippingAddressId, 
+    billingAddressId, 
+    paymentMethod, 
+    couponCode, 
+    promoCode, 
+    shippingMethod,
+    razorpayPaymentId,
+    razorpayOrderId,
+    razorpaySignature 
+  } = req.body;
 
   // 1) Validation
   if (!paymentMethod) {
@@ -140,6 +270,22 @@ exports.createOrder = catchAsync(async (req, res, next) => {
   }
 
   // Create order
+  const isPaid = (paymentMethod === 'razorpay' && razorpayPaymentId && razorpaySignature);
+  
+  // Verify Payment if provided
+  if (isPaid) {
+    const crypto = require('crypto');
+    const body = razorpayOrderId + "|" + razorpayPaymentId;
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(body.toString())
+      .digest("hex");
+
+    if (expectedSignature !== razorpaySignature) {
+      return next(new AppError('Invalid payment signature', 400));
+    }
+  }
+
   const order = await Order.create({
     user: req.user.id,
     subtotal: cart.cartTotal,
@@ -149,9 +295,12 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     grandTotal,
     currency: 'INR',
     paymentMethod,
-    paymentStatus: paymentMethod === 'cod' ? 'pending' : 'pending',
-    status: 'pending',
-    promoCode: appliedPromoCodeStr
+    paymentStatus: isPaid ? 'paid' : 'pending',
+    status: isPaid ? 'confirmed' : 'pending',
+    promoCode: appliedPromoCodeStr,
+    razorpayOrderId,
+    razorpayPaymentId,
+    razorpaySignature
   });
 
   // Create order items
@@ -260,9 +409,9 @@ exports.createOrder = catchAsync(async (req, res, next) => {
   // Emit and persist new order notification
   notifyNewOrder(order._id);
 
-  // Create Razorpay order for online payments
+  // Create Razorpay order for online payments if not already paid
   let razorpayOrder = null;
-  if (paymentMethod !== 'cod') {
+  if (paymentMethod !== 'cod' && !isPaid) {
     try {
       const options = {
         amount: Math.round(grandTotal * 100), // Amount in paise
@@ -283,7 +432,7 @@ exports.createOrder = catchAsync(async (req, res, next) => {
       // Continue without Razorpay order - order is still created
       console.error('Razorpay order creation failed:', error);
     }
-  } else {
+  } else if (paymentMethod === 'cod') {
     // For COD, create Shiprocket shipment immediately
     try {
       await shippingService.processShipmentForOrder(order._id);

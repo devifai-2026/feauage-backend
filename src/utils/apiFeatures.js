@@ -8,7 +8,7 @@ class APIFeatures {
 
   filter() {
     const queryObj = { ...this.queryString };
-    const excludedFields = ['page', 'sort', 'limit', 'fields'];
+    const excludedFields = ['page', 'sort', 'limit', 'fields', 'search'];
     excludedFields.forEach(el => delete queryObj[el]);
 
     // Remove empty strings, null, and undefined values from queryObj
@@ -16,7 +16,7 @@ class APIFeatures {
       if (queryObj[key] === '' || queryObj[key] === null || queryObj[key] === undefined) {
         delete queryObj[key];
       }
-      
+
       // Also handle date range fields
       if (key === 'startDate' || key === 'endDate') {
         delete queryObj[key];
@@ -26,15 +26,15 @@ class APIFeatures {
     // If startDate and endDate are provided separately, create a date range filter
     if (this.queryString.startDate || this.queryString.endDate) {
       const dateFilter = {};
-      
+
       if (this.queryString.startDate) {
         dateFilter.$gte = new Date(this.queryString.startDate);
       }
-      
+
       if (this.queryString.endDate) {
         dateFilter.$lte = new Date(this.queryString.endDate);
       }
-      
+
       if (Object.keys(dateFilter).length > 0) {
         queryObj.createdAt = dateFilter;
       }
@@ -49,10 +49,29 @@ class APIFeatures {
     } else {
       this.filterQuery = JSON.parse(queryStr);
     }
-    
+
     console.log("Final filter query:", this.filterQuery);
     this.query = this.query.find(this.filterQuery);
 
+    return this;
+  }
+
+  search() {
+    if (this.queryString.search) {
+      const searchTerm = this.queryString.search;
+      const searchQuery = {
+        $or: [
+          { name: { $regex: searchTerm, $options: 'i' } },
+          { sku: { $regex: searchTerm, $options: 'i' } },
+          { description: { $regex: searchTerm, $options: 'i' } },
+          { brand: { $regex: searchTerm, $options: 'i' } },
+          { tags: { $regex: searchTerm, $options: 'i' } }
+        ]
+      };
+
+      this.filterQuery = { ...this.filterQuery, ...searchQuery };
+      this.query = this.query.find(searchQuery);
+    }
     return this;
   }
 

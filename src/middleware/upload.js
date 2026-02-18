@@ -1,189 +1,165 @@
 const multer = require('multer');
 const multerS3 = require('multer-s3');
-const AWS = require('aws-sdk');
+const { S3Client } = require('@aws-sdk/client-s3');
 const path = require('path');
 const AppError = require('../utils/appError');
 
-// Configure AWS S3
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION || 'ap-south-1'
+// =============================
+// AWS S3 CONFIG
+// =============================
+
+const s3 = new S3Client({
+  region: process.env.AWS_REGION || 'ap-south-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
 });
 
-// File filter
+// =============================
+// FILE FILTER
+// =============================
+
 const fileFilter = (req, file, cb) => {
-  // Allowed extensions
   const filetypes = /jpeg|jpg|png|gif|webp/;
-  // Check extension
-  const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-  // Check mime type
+  const extname = filetypes.test(
+    path.extname(file.originalname).toLowerCase()
+  );
   const mimetype = filetypes.test(file.mimetype);
 
   if (mimetype && extname) {
-    return cb(null, true);
+    cb(null, true);
   } else {
-    cb(new AppError('Error: Images Only!', 400), false);
+    cb(new AppError('Images only!', 400), false);
   }
 };
 
-// Multer configuration for product images
-const productUpload = multer({
-  storage: multerS3({
-    s3: s3,
+// =============================
+// COMMON STORAGE FACTORY
+// =============================
+
+const createStorage = (folder) =>
+  multerS3({
+    s3,
     bucket: process.env.AWS_S3_BUCKET_NAME,
-    acl: 'public-read',
-    metadata: function (req, file, cb) {
+    contentType: multerS3.AUTO_CONTENT_TYPE,
+
+    metadata: (req, file, cb) => {
       cb(null, { fieldName: file.fieldname });
     },
-    key: function (req, file, cb) {
-      const userId = req.user ? req.user.id : 'anonymous';
-      const timestamp = Date.now();
-      const filename = `products/${userId}-${timestamp}-${file.originalname}`;
-      cb(null, filename);
-    }
-  }),
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
-  },
-  fileFilter: fileFilter
-});
 
-// Multer configuration for banner images
-const bannerUpload = multer({
-  storage: multerS3({
-    s3: s3,
-    bucket: process.env.AWS_S3_BUCKET_NAME,
-    acl: 'public-read',
-    metadata: function (req, file, cb) {
-      cb(null, { fieldName: file.fieldname });
+    key: (req, file, cb) => {
+      const userId = req.user?.id || 'anonymous';
+      const timestamp = Date.now();
+
+      const sanitizedName = file.originalname.replace(
+        /[^a-zA-Z0-9.-]/g,
+        '-'
+      );
+
+      cb(null, `${folder}/${userId}-${timestamp}-${sanitizedName}`);
     },
-    key: function (req, file, cb) {
-      const userId = req.user ? req.user.id : 'anonymous';
-      const timestamp = Date.now();
-      const filename = `banners/${userId}-${timestamp}-${file.originalname}`;
-      cb(null, filename);
-    }
-  }),
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
-  },
-  fileFilter: fileFilter
-});
+  });
 
-// Multer configuration for user profile images
-const profileUpload = multer({
-  storage: multerS3({
-    s3: s3,
-    bucket: process.env.AWS_S3_BUCKET_NAME,
-    acl: 'public-read',
-    metadata: function (req, file, cb) {
-      cb(null, { fieldName: file.fieldname });
-    },
-    key: function (req, file, cb) {
-      const userId = req.user.id;
-      const timestamp = Date.now();
-      const ext = path.extname(file.originalname);
-      const filename = `users/${userId}-profile-${timestamp}${ext}`;
-      cb(null, filename);
-    }
-  }),
-  limits: {
-    fileSize: 2 * 1024 * 1024 // 2MB limit
-  },
-  fileFilter: fileFilter
-});
+// =============================
+// MULTER FACTORY
+// =============================
 
-// Multer configuration for review images
-const reviewUpload = multer({
-  storage: multerS3({
-    s3: s3,
-    bucket: process.env.AWS_S3_BUCKET_NAME,
-    acl: 'public-read',
-    metadata: function (req, file, cb) {
-      cb(null, { fieldName: file.fieldname });
-    },
-    key: function (req, file, cb) {
-      const userId = req.user ? req.user.id : 'anonymous';
-      const timestamp = Date.now();
-      const filename = `reviews/${userId}-${timestamp}-${file.originalname}`;
-      cb(null, filename);
-    }
-  }),
-  limits: {
-    fileSize: 3 * 1024 * 1024 // 3MB limit
-  },
-  fileFilter: fileFilter
-});
+const createUploader = (folder, sizeMB = 5) =>
+  multer({
+    storage: createStorage(folder),
+    limits: { fileSize: sizeMB * 1024 * 1024 },
+    fileFilter,
+  });
 
-// Multer configuration for category images
-const categoryUpload = multer({
-  storage: multerS3({
-    s3: s3,
-    bucket: process.env.AWS_S3_BUCKET_NAME,
-    acl: 'public-read',
-    metadata: function (req, file, cb) {
-      cb(null, { fieldName: file.fieldname });
-    },
-    key: function (req, file, cb) {
-      const timestamp = Date.now();
-      const filename = `categories/category-${timestamp}-${file.originalname}`;
-      cb(null, filename);
-    }
-  }),
-  limits: {
-    fileSize: 2 * 1024 * 1024 // 2MB limit
-  },
-  fileFilter: fileFilter
-});
+// =============================
+// EXPORTS
+// =============================
 
-// Export upload middleware
 module.exports = {
-  uploadProductImages: productUpload.array('images', 10),
-  uploadBannerImage: bannerUpload.single('image'),
-  uploadProfileImage: profileUpload.single('image'),
-  uploadReviewImages: reviewUpload.array('images', 5),
-  uploadCategoryImage: categoryUpload.single('image'),
-  
-  // Single file upload (generic)
-  uploadSingle: (fieldName) => multer({
+  // Products (max 10 images)
+  uploadProductImages: createUploader('products', 5).array(
+    'images',
+    10
+  ),
+
+  // Banner (single)
+  uploadBannerImage: createUploader('banners', 5).single(
+    'image'
+  ),
+
+  // Profile (single, smaller limit)
+  uploadProfileImage: createUploader('users', 2).single(
+    'image'
+  ),
+
+  // Reviews (max 5)
+  uploadReviewImages: createUploader('reviews', 3).array(
+    'images',
+    5
+  ),
+
+  // Category
+  uploadCategoryImage: createUploader('categories', 2).single(
+    'image'
+  ),
+
+  // Generic Single
+  uploadSingle: (fieldName) =>
+    createUploader(fieldName, 5).single(fieldName),
+
+  // Generic via ?folder=xyz
+  uploadGenericSingle: multer({
     storage: multerS3({
-      s3: s3,
+      s3,
       bucket: process.env.AWS_S3_BUCKET_NAME,
-      acl: 'public-read',
-      metadata: function (req, file, cb) {
-        cb(null, { fieldName: file.fieldname });
-      },
-      key: function (req, file, cb) {
+      contentType: multerS3.AUTO_CONTENT_TYPE,
+      key: (req, file, cb) => {
+        const folder = (
+          req.query.folder ||
+          req.body.folder ||
+          'general'
+        ).replace(/[^a-zA-Z0-9-_]/g, '');
+
         const timestamp = Date.now();
-        const filename = `${fieldName}/${timestamp}-${file.originalname}`;
-        cb(null, filename);
-      }
+        const sanitizedName = file.originalname.replace(
+          /[^a-zA-Z0-9.-]/g,
+          '-'
+        );
+
+        cb(null, `${folder}/${timestamp}-${sanitizedName}`);
+      },
     }),
-    limits: {
-      fileSize: 5 * 1024 * 1024
-    },
-    fileFilter: fileFilter
-  }).single(fieldName),
-  
-  // Multiple files upload (generic)
-  uploadMultiple: (fieldName, maxCount) => multer({
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter,
+  }).single('image'),
+
+  uploadGenericMultiple: multer({
     storage: multerS3({
-      s3: s3,
+      s3,
       bucket: process.env.AWS_S3_BUCKET_NAME,
-      acl: 'public-read',
-      metadata: function (req, file, cb) {
-        cb(null, { fieldName: file.fieldname });
-      },
-      key: function (req, file, cb) {
+      contentType: multerS3.AUTO_CONTENT_TYPE,
+      key: (req, file, cb) => {
+        const folder = (
+          req.query.folder ||
+          req.body.folder ||
+          'general'
+        ).replace(/[^a-zA-Z0-9-_]/g, '');
+
         const timestamp = Date.now();
-        const filename = `${fieldName}/${timestamp}-${file.originalname}`;
-        cb(null, filename);
-      }
+        const sanitizedName = file.originalname.replace(
+          /[^a-zA-Z0-9.-]/g,
+          '-'
+        );
+
+        cb(null, `${folder}/${timestamp}-${sanitizedName}`);
+      },
     }),
-    limits: {
-      fileSize: 5 * 1024 * 1024
-    },
-    fileFilter: fileFilter
-  }).array(fieldName, maxCount)
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter,
+  }).array('images', 10),
+
+  // Fully Custom Multiple
+  uploadMultiple: (fieldName, maxCount) =>
+    createUploader(fieldName, 5).array(fieldName, maxCount),
 };

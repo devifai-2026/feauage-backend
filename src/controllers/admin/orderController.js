@@ -9,6 +9,7 @@ const { emitOrderNotification } = require('../../sockets/orderSocket');
 const catchAsync = require('../../utils/catchAsync');
 const AppError = require('../../utils/appError');
 const APIFeatures = require('../../utils/apiFeatures');
+const PDFDocument = require('pdfkit');
 
 // Initialize shipping service
 const shippingService = new ShippingService();
@@ -151,8 +152,8 @@ exports.updateOrderStatus = catchAsync(async (req, res, next) => {
     });
   }
   
-  // If order is cancelled and payment was made, initiate refund
-  if (status === 'cancelled' && order.paymentStatus === 'paid') {
+  // If order is cancelled, return stock for items
+  if (status === 'cancelled' && previousStatus !== 'cancelled') {
     // Return stock for cancelled items
     const orderItems = await OrderItem.find({ order: order._id });
     
@@ -613,8 +614,8 @@ exports.bulkUpdateOrders = catchAsync(async (req, res, next) => {
       userAgent: req.get('user-agent')
     });
     
-    // If order is cancelled and payment was made, return stock
-    if (status === 'cancelled' && order.paymentStatus === 'paid') {
+    // If order is cancelled, return stock
+    if (status === 'cancelled' && previousStatus !== 'cancelled') {
       const orderItems = await OrderItem.find({ order: orderId });
       
       for (const item of orderItems) {
@@ -938,53 +939,130 @@ exports.generateInvoice = catchAsync(async (req, res, next) => {
     return next(new AppError('Order not found', 404));
   }
   
-  // This is a simplified example - in production, use a PDF generation library
-  // like pdfkit, puppeteer, or a dedicated PDF service
-  
-  // For now, we'll return JSON data that can be used to generate PDF on client side
-  // In production, implement actual PDF generation
-  
-  const invoiceData = {
-    invoiceNumber: order.orderId,
-    date: order.createdAt,
-    customer: {
-      name: `${order.user.firstName} ${order.user.lastName}`,
-      email: order.user.email,
-      phone: order.user.phone
-    },
-    shippingAddress: order.addresses.find(addr => addr.type === 'shipping'),
-    billingAddress: order.addresses.find(addr => addr.type === 'billing'),
-    items: order.items.map(item => ({
-      name: item.productName || item.name,
-      sku: item.sku,
-      quantity: item.quantity,
-      price: item.price,
-      total: item.price * item.quantity
-    })),
-    subtotal: order.subtotal,
-    discount: order.discount,
-    promoCode: order.promoCode,
-    shippingCharge: order.shippingCharge,
-    tax: order.tax,
-    grandTotal: order.grandTotal,
-    status: order.status,
-    paymentMethod: order.paymentMethod,
-    paymentStatus: order.paymentStatus
-  };
-  
-  // Note: In production, generate actual PDF buffer
-  // const pdfBuffer = await generatePDF(invoiceData);
-  // res.set({
-  //   'Content-Type': 'application/pdf',
-  //   'Content-Disposition': `attachment; filename="invoice-${order.orderId}.pdf"`
-  // });
-  // res.send(pdfBuffer);
-  
-  // For now, return JSON
-  res.status(200).json({
-    status: 'success',
-    data: invoiceData
+  // Create a PDF document
+  const doc = new PDFDocument({ margin: 50 });
+
+  // Buffers to store PDF data
+  const buffers = [];
+  doc.on('data', (chunk) => buffers.push(chunk));
+  doc.on('end', () => {
+    const pdfBuffer = Buffer.concat(buffers);
+    
+    // Set response headers
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="invoice-${order.orderId}.pdf"`,
+      'Content-Length': pdfBuffer.length
+    });
+
+    // Send the PDF buffer
+    res.status(200).send(pdfBuffer);
   });
+
+  // Header - Company Logo/Name
+  doc.fillColor('#444444')
+     .fontSize(20)
+     .text('FEAUAGE', 50, 50);
+  
+  doc.fontSize(10)
+     .text('Premium Jewelry Store', 50, 75)
+     .text('123 Luxury Lane, Jewelry District', 50, 90)
+     .text('Mumbai, Maharashtra, 400001', 50, 105)
+     .moveDown();
+
+  // Invoice Title
+  doc.fillColor('#000000')
+     .fontSize(20)
+     .text('INVOICE', 50, 140, { align: 'right' });
+
+  // Invoice Info
+  doc.fontSize(10)
+     .text(`Invoice Number: ${order.orderId}`, 50, 170, { align: 'right' })
+     .text(`Date: ${new Date(order.createdAt).toLocaleDateString()}`, 50, 185, { align: 'right' })
+     .text(`Payment Status: ${order.paymentStatus.toUpperCase()}`, 50, 200, { align: 'right' })
+     .moveDown();
+
+  // Billing & Shipping Info
+  const billingAddr = order.addresses.find(addr => addr.type === 'billing') || order.addresses[0];
+  const shippingAddr = order.addresses.find(addr => addr.type === 'shipping') || order.addresses[0];
+
+  doc.fontSize(12).text('Bill To:', 50, 230);
+  doc.fontSize(10)
+     .text(`${order.user.firstName} ${order.user.lastName}`, 50, 245)
+     .text(billingAddr.addressLine1, 50, 260)
+     .text(`${billingAddr.city}, ${billingAddr.state} ${billingAddr.pincode}`, 50, 275)
+     .text(order.user.email, 50, 290)
+     .text(order.user.phone, 50, 305);
+
+  doc.fontSize(12).text('Ship To:', 300, 230);
+  doc.fontSize(10)
+     .text(`${order.user.firstName} ${order.user.lastName}`, 300, 245)
+     .text(shippingAddr.addressLine1, 300, 260)
+     .text(`${shippingAddr.city}, ${shippingAddr.state} ${shippingAddr.pincode}`, 300, 275)
+     .moveDown();
+
+  // Table Header
+  const tableTop = 350;
+  doc.fontSize(10).font('Helvetica-Bold');
+  doc.text('Item', 50, tableTop);
+  doc.text('SKU', 180, tableTop);
+  doc.text('Price', 280, tableTop, { width: 90, align: 'right' });
+  doc.text('Qty', 370, tableTop, { width: 50, align: 'right' });
+  doc.text('Total', 470, tableTop, { width: 90, align: 'right' });
+
+  doc.moveTo(50, tableTop + 15).lineTo(560, tableTop + 15).stroke();
+
+  // Table Content
+  let y = tableTop + 25;
+  doc.font('Helvetica');
+  
+  order.items.forEach((item) => {
+    const itemName = item.productName || (item.product ? item.product.name : 'Product');
+    const price = item.price;
+    const qty = item.quantity;
+    const total = price * qty;
+
+    doc.text(itemName, 50, y, { width: 120 });
+    doc.text(item.sku || 'N/A', 180, y);
+    doc.text(`INR ${price.toFixed(2)}`, 280, y, { width: 90, align: 'right' });
+    doc.text(qty.toString(), 370, y, { width: 50, align: 'right' });
+    doc.text(`INR ${total.toFixed(2)}`, 470, y, { width: 90, align: 'right' });
+    
+    y += 20;
+  });
+
+  // Totals
+  doc.moveTo(350, y + 10).lineTo(560, y + 10).stroke();
+  y += 20;
+
+  doc.text('Subtotal:', 350, y, { width: 100, align: 'right' });
+  doc.text(`INR ${order.subtotal.toFixed(2)}`, 470, y, { width: 90, align: 'right' });
+  
+  y += 15;
+  if (order.discount > 0) {
+    doc.text('Discount:', 350, y, { width: 100, align: 'right' });
+    doc.text(`-INR ${order.discount.toFixed(2)}`, 470, y, { width: 90, align: 'right' });
+    y += 15;
+  }
+
+  doc.text('Shipping:', 350, y, { width: 100, align: 'right' });
+  doc.text(`INR ${order.shippingCharge.toFixed(2)}`, 470, y, { width: 90, align: 'right' });
+  
+  y += 15;
+  doc.text('Tax (GST):', 350, y, { width: 100, align: 'right' });
+  doc.text(`INR ${order.tax.toFixed(2)}`, 470, y, { width: 90, align: 'right' });
+  
+  y += 20;
+  doc.fontSize(12).font('Helvetica-Bold');
+  doc.text('Grand Total:', 350, y, { width: 100, align: 'right' });
+  doc.text(`INR ${order.grandTotal.toFixed(2)}`, 470, y, { width: 90, align: 'right' });
+
+  // Footer
+  doc.fontSize(10).font('Helvetica')
+     .text('Thank you for shopping with FEAUAGE!', 50, 700, { align: 'center', width: 500 });
+
+  // Finalize PDF file
+  doc.end();
 });
 
 // @desc    Send invoice via email

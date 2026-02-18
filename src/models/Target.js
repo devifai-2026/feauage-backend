@@ -32,7 +32,7 @@ const targetSchema = new mongoose.Schema({
     type: Date,
     required: [true, 'Start date is required'],
     validate: {
-      validator: function(value) {
+      validator: function (value) {
         return value <= this.endDate;
       },
       message: 'Start date must be before end date'
@@ -42,7 +42,7 @@ const targetSchema = new mongoose.Schema({
     type: Date,
     required: [true, 'End date is required'],
     validate: {
-      validator: function(value) {
+      validator: function (value) {
         return value >= this.startDate;
       },
       message: 'End date must be after start date'
@@ -110,7 +110,7 @@ targetSchema.index({ isActive: 1 });
 targetSchema.index({ targetType: 1 });
 
 // Virtual for days remaining
-targetSchema.virtual('daysRemaining').get(function() {
+targetSchema.virtual('daysRemaining').get(function () {
   const now = new Date();
   const end = new Date(this.endDate);
   const diffTime = end - now;
@@ -119,22 +119,22 @@ targetSchema.virtual('daysRemaining').get(function() {
 });
 
 // Virtual for target achievement
-targetSchema.virtual('achievementPercentage').get(function() {
+targetSchema.virtual('achievementPercentage').get(function () {
   if (this.targetValue === 0) return 0;
   return Math.min(Math.round((this.currentValue / this.targetValue) * 100), 100);
 });
 
 // Virtual for isOverdue
-targetSchema.virtual('isOverdue').get(function() {
+targetSchema.virtual('isOverdue').get(function () {
   return new Date() > new Date(this.endDate) && this.status === 'active';
 });
 
 // Virtual for period label
-targetSchema.virtual('periodLabel').get(function() {
+targetSchema.virtual('periodLabel').get(function () {
   const start = new Date(this.startDate);
   const end = new Date(this.endDate);
-  
-  switch(this.period) {
+
+  switch (this.period) {
     case 'daily':
       return start.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' });
     case 'weekly':
@@ -157,48 +157,60 @@ targetSchema.virtual('periodLabel').get(function() {
   }
 });
 
-// Pre-save middleware to calculate progress
-targetSchema.pre('save', function(next) {
-  // Calculate progress percentage
+// Pre-validate middleware: cap progress before validators run
+targetSchema.pre('validate', function (next) {
   if (this.targetValue > 0) {
     this.progress = Math.min(Math.round((this.currentValue / this.targetValue) * 100), 100);
   }
-  
+  next();
+});
+
+// Pre-save middleware to update status based on progress and dates
+targetSchema.pre('save', function (next) {
   // Update status based on dates
   const now = new Date();
   const endDate = new Date(this.endDate);
-  
-  if (this.status === 'active' && now > endDate) {
-    if (this.progress >= 100) {
-      this.status = 'completed';
+
+  if (this.isActive && this.status !== 'archived') {
+    if (now > endDate) {
+      // Overdue logic
+      if (this.progress >= 100) {
+        this.status = 'completed';
+      } else {
+        this.status = 'failed';
+      }
     } else {
-      this.status = 'failed';
+      // Active period logic
+      if (this.progress >= 100) {
+        this.status = 'completed';
+      } else {
+        this.status = 'active';
+      }
     }
   }
-  
+
   next();
 });
 
 // Static method to get current active target
-targetSchema.statics.getCurrentTarget = async function(userId, targetType = 'revenue') {
+targetSchema.statics.getCurrentTarget = async function (userId, targetType = 'revenue') {
   const now = new Date();
-  
+
   return this.findOne({
     userId,
     targetType,
     isActive: true,
     startDate: { $lte: now },
-    endDate: { $gte: now },
-    status: 'active'
+    endDate: { $gte: now }
   }).sort({ createdAt: -1 });
 };
 
 // Static method to get target statistics
 // Static method to get target statistics
-targetSchema.statics.getTargetStats = async function(userId) {
+targetSchema.statics.getTargetStats = async function (userId) {
   // Convert userId to ObjectId using 'new' keyword
   const userObjectId = new mongoose.Types.ObjectId(userId);
-  
+
   return this.aggregate([
     {
       $match: {
@@ -250,7 +262,7 @@ targetSchema.statics.getTargetStats = async function(userId) {
   ]);
 };
 // Instance method to update current value
-targetSchema.methods.updateCurrentValue = async function(newValue) {
+targetSchema.methods.updateCurrentValue = async function (newValue) {
   this.currentValue = newValue;
   return this.save();
 };

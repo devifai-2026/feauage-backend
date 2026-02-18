@@ -81,7 +81,7 @@ const notificationSchema = new mongoose.Schema({
   // Auto-expire notifications
   expiresAt: {
     type: Date,
-    default: function() {
+    default: function () {
       // Default expiry: 30 days from creation
       return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     }
@@ -107,24 +107,24 @@ notificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 notificationSchema.index({ priority: 1 });
 
 // Virtual for checking if notification is read by a specific user
-notificationSchema.methods.isReadByUser = function(userId) {
+notificationSchema.methods.isReadByUser = function (userId) {
   return this.readBy.some(read => read.user.toString() === userId.toString());
 };
 
 // Static method to get unread notifications for admin
-notificationSchema.statics.getUnreadForAdmin = async function(adminId, limit = 20) {
+notificationSchema.statics.getUnreadForAdmin = async function (adminId, limit = 20) {
   return this.find({
     recipients: { $in: ['admin', 'superadmin', 'all'] },
     isActive: true,
     'readBy.user': { $ne: adminId }
   })
-  .sort({ createdAt: -1 })
-  .limit(limit)
-  .lean();
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .lean();
 };
 
 // Static method to get all notifications for admin with pagination
-notificationSchema.statics.getAdminNotifications = async function(options = {}) {
+notificationSchema.statics.getAdminNotifications = async function (options = {}) {
   const {
     page = 1,
     limit = 20,
@@ -167,7 +167,7 @@ notificationSchema.statics.getAdminNotifications = async function(options = {}) 
 };
 
 // Static method to mark notification as read
-notificationSchema.statics.markAsRead = async function(notificationId, userId) {
+notificationSchema.statics.markAsRead = async function (notificationId, userId) {
   return this.findByIdAndUpdate(
     notificationId,
     {
@@ -180,7 +180,7 @@ notificationSchema.statics.markAsRead = async function(notificationId, userId) {
 };
 
 // Static method to mark all notifications as read for a user
-notificationSchema.statics.markAllAsRead = async function(userId, recipients = ['admin', 'superadmin', 'all']) {
+notificationSchema.statics.markAllAsRead = async function (userId, recipients = ['admin', 'superadmin', 'all']) {
   return this.updateMany(
     {
       recipients: { $in: recipients },
@@ -195,7 +195,7 @@ notificationSchema.statics.markAllAsRead = async function(userId, recipients = [
 };
 
 // Static method to get unread count
-notificationSchema.statics.getUnreadCount = async function(userId, recipients = ['admin', 'superadmin', 'all']) {
+notificationSchema.statics.getUnreadCount = async function (userId, recipients = ['admin', 'superadmin', 'all']) {
   return this.countDocuments({
     recipients: { $in: recipients },
     isActive: true,
@@ -204,7 +204,7 @@ notificationSchema.statics.getUnreadCount = async function(userId, recipients = 
 };
 
 // Static method to create order notification
-notificationSchema.statics.createOrderNotification = async function(order, type = 'new_order') {
+notificationSchema.statics.createOrderNotification = async function (order, type = 'new_order') {
   const notificationData = {
     type,
     entityType: 'order',
@@ -215,14 +215,14 @@ notificationSchema.statics.createOrderNotification = async function(order, type 
 
   switch (type) {
     case 'new_order':
-      notificationData.title = 'New Order Received';
+      notificationData.title = `New Order Received (${order.status})`;
       // Format: [user] bought [product] on [date] at [time]
       const orderDate = new Date(order.createdAt || Date.now());
       const dateStr = orderDate.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
       const timeStr = orderDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
       const productName = order.items && order.items.length > 0 ? order.items[0].productName : 'items';
-      
-      notificationData.message = `${order.user?.firstName || 'A customer'} bought ${productName}${order.items?.length > 1 ? ` and others` : ''} on ${dateStr} at ${timeStr}`;
+
+      notificationData.message = `${order.user?.firstName || 'A customer'} placed a ${order.status} order for ${productName}${order.items?.length > 1 ? ` and others` : ''} on ${dateStr} at ${timeStr}`;
       break;
     case 'order_update':
       notificationData.title = 'Order Status Updated';
@@ -250,7 +250,7 @@ notificationSchema.statics.createOrderNotification = async function(order, type 
 };
 
 // Static method to create stock alert notification
-notificationSchema.statics.createStockAlert = async function(product, alertType = 'low_stock') {
+notificationSchema.statics.createStockAlert = async function (product, alertType = 'low_stock') {
   return this.create({
     type: alertType,
     title: alertType === 'low_stock' ? 'Low Stock Alert' : 'Out of Stock Alert',
