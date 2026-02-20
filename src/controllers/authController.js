@@ -406,18 +406,29 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   }
 
   // 2) Generate the random reset token
-  const resetToken = user.createPasswordResetToken();
+  // Use dummy OTP "111111" for testing
+  const resetToken = '111111';
+  const hashedToken = crypto
+    .createHash('sha256')
+    .update(resetToken)
+    .digest('hex');
+
+  user.passwordResetToken = hashedToken;
+  user.passwordResetExpires = Date.now() + 10 * 60 * 1000;
   await user.save({ validateBeforeSave: false });
 
   // 3) Send it to user's email
   try {
+    // Dummy: we don't actually send email, just return success
+    // If you'd like to still send it, the logic is below but commented.
+    /*
     const resetURL = `${req.protocol}://${req.get('host')}/api/v1/auth/reset-password/${resetToken}`;
-
     await new Email(user, resetURL).sendPasswordReset();
+    */
 
     res.status(200).json({
       status: 'success',
-      message: 'Token sent to email!'
+      message: 'Token sent to email (Dummy OTP is 111111)'
     });
   } catch (err) {
     user.passwordResetToken = undefined;
@@ -426,6 +437,37 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
 
     return next(new AppError('There was an error sending the email. Try again later!', 500));
   }
+});
+
+// @desc Dummy send register OTP
+exports.sendRegisterOtp = catchAsync(async (req, res, next) => {
+  const { email } = req.body;
+  if (!email) return next(new AppError('Please provide an email', 400));
+  
+  const existingUser = await User.findOne({ email });
+  if (existingUser) {
+    return next(new AppError('User with this email already exists', 400));
+  }
+  
+  res.status(200).json({
+    status: 'success',
+    message: 'OTP sent successfully (Dummy OTP is 111111)'
+  });
+});
+
+// @desc Dummy verify OTP
+exports.verifyOtp = catchAsync(async (req, res, next) => {
+  const { otp } = req.body;
+  if (!otp) return next(new AppError('Please provide an OTP', 400));
+  
+  if (otp !== '111111') {
+    return next(new AppError('Invalid OTP', 400));
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: 'OTP verified successfully'
+  });
 });
 
 // @desc    Reset password

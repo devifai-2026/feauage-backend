@@ -25,6 +25,9 @@ router.post('/reset-password/:token', resetPassword);
 router.get('/verify-email/:token', verifyEmail);
 router.post('/resend-verification', resendVerification);
 
+router.post('/send-register-otp', require('../controllers/authController').sendRegisterOtp);
+router.post('/verify-otp', require('../controllers/authController').verifyOtp);
+
 // Protected routes
 router.use(protect);
 router.post('/logout', logout);
