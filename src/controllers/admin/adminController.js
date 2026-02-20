@@ -9,6 +9,10 @@ const APIFeatures = require('../../utils/apiFeatures');
 const Analytics = require('../../models/Analytics'); // Your analytics model
 const GuestUser = require('../../models/GuestUser');
 const UserActivityLog = require('../../models/UserActivityLog');
+const Wishlist = require('../../models/Wishlist');
+const WishlistItem = require('../../models/WishlistItem');
+const Cart = require('../../models/Cart');
+const CartItem = require('../../models/CartItem');
 const { toIST } = require('../../utils/dateHelpers');
 
 // @desc    Get admin dashboard stats
@@ -1269,21 +1273,7 @@ exports.getUserById = catchAsync(async (req, res, next) => {
      1. USER + CART + WISHLIST
      ========================= */
   const user = await User.findById(userId)
-    .select('-password -__v')
-    .populate({
-      path: 'cart',
-      populate: {
-        path: 'items',              // Cart → CartItem
-        populate: {
-          path: 'product',          // CartItem → Product
-          select: 'name sellingPrice offerPrice images stockStatus'
-        }
-      }
-    })
-    .populate({
-      path: 'wishlist',
-      select: 'name sellingPrice images'
-    });
+    .select('-password -__v');
 
   if (!user) {
     return next(new AppError('User not found', 404));
@@ -1439,14 +1429,43 @@ exports.getUserById = catchAsync(async (req, res, next) => {
     .limit(20);
 
   /* =========================
-     8. RECENT WISHLIST ITEMS
+     8. WISHLIST (via Wishlist model)
      ========================= */
-  const wishlistItems = await Product.find({
-    _id: { $in: user.wishlist }
-  })
-    .select('name sellingPrice images category')
-    .limit(5)
-    .populate('category', 'name');
+  const userWishlist = await Wishlist.findOne({ user: userId });
+  let wishlistCount = 0;
+  let wishlistItems = [];
+
+  if (userWishlist) {
+    const rawWishlistItems = await WishlistItem.find({ wishlist: userWishlist._id })
+      .populate({
+        path: 'product',
+        select: 'name sellingPrice images category',
+        populate: { path: 'category', select: 'name' }
+      })
+      .sort('-addedAt')
+      .limit(10);
+
+    wishlistCount = userWishlist.items.length;
+    wishlistItems = rawWishlistItems.map(item => item.product).filter(Boolean);
+  }
+
+  /* =========================
+     8b. CART (via Cart model)
+     ========================= */
+  const userCart = await Cart.findOne({ user: userId });
+  let cartItemsCount = 0;
+  let cartItems = [];
+  let cartTotal = 0;
+
+  if (userCart) {
+    const rawCartItems = await CartItem.find({ cart: userCart._id })
+      .populate({ path: 'product', select: 'name sellingPrice offerPrice images stockStatus' })
+      .sort('-addedAt');
+
+    cartItemsCount = rawCartItems.length;
+    cartItems = rawCartItems;
+    cartTotal = userCart.grandTotal || 0;
+  }
 
   /* =========================
      9. ANALYTICS SUMMARY
@@ -1456,8 +1475,9 @@ exports.getUserById = catchAsync(async (req, res, next) => {
     monthlyData,
     categorySpending,
     loginCount: loginHistory.length,
-    wishlistCount: user.wishlist.length,
-    cartItemsCount: user.cart?.items?.length || 0
+    wishlistCount,
+    cartItemsCount,
+    cartTotal
   };
 
   /* =========================
@@ -1471,7 +1491,8 @@ exports.getUserById = catchAsync(async (req, res, next) => {
       recentOrders,
       analytics,
       loginHistory,
-      wishlistItems
+      wishlistItems,
+      cartItems
     }
   });
 });
@@ -1692,6 +1713,21 @@ exports.deleteUser = catchAsync(async (req, res, next) => {
   if (ongoingOrdersCount > 0) {
     return next(new AppError(
       `Cannot delete user. User has ${ongoingOrdersCount} ongoing order(s). Please complete or cancel these orders first.`,
+      400
+    ));
+  }
+
+  // Check for wishlist items
+  const userWishlistCheck = await Wishlist.findOne({ user: req.params.id });
+  const wishlistItemsCount = userWishlistCheck ? userWishlistCheck.items.length : 0;
+
+  // Check for cart items
+  const userCartCheck = await Cart.findOne({ user: req.params.id });
+  const cartItemsCount = userCartCheck ? userCartCheck.items.length : 0;
+
+  if (wishlistItemsCount > 0 || cartItemsCount > 0) {
+    return next(new AppError(
+      `Cannot delete user. User has ${wishlistItemsCount} item(s) in wishlist and ${cartItemsCount} item(s) in cart.`,
       400
     ));
   }
