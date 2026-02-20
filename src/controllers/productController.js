@@ -242,7 +242,7 @@ exports.getProductReviews = catchAsync(async (req, res, next) => {
 exports.searchProducts = catchAsync(async (req, res, next) => {
   const { q, category, minPrice, maxPrice, material, gender, sort, page = 1, limit = 20 } = req.query;
   
-  const query = { isActive: true };
+  const query = {};
   
   // Text search
   if (q) {
@@ -346,7 +346,6 @@ exports.searchProducts = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getFeaturedProducts = catchAsync(async (req, res, next) => {
   const products = await Product.find({
-    isActive: true,
     isFeatured: true
   })
   .limit(10)
@@ -367,7 +366,6 @@ exports.getFeaturedProducts = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getNewArrivals = catchAsync(async (req, res, next) => {
   const products = await Product.find({
-    isActive: true,
     isNewArrival: true
   })
   .limit(10)
@@ -388,7 +386,6 @@ exports.getNewArrivals = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getBestSellers = catchAsync(async (req, res, next) => {
   const products = await Product.find({
-    isActive: true,
     isBestSeller: true
   })
   .limit(10)
@@ -409,7 +406,6 @@ exports.getBestSellers = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getProductsOnSale = catchAsync(async (req, res, next) => {
   const products = await Product.find({
-    isActive: true,
     isOnOffer: true,
     offerStartDate: { $lte: new Date() },
     offerEndDate: { $gte: new Date() }
@@ -439,8 +435,7 @@ exports.getProductsByCategory = catchAsync(async (req, res, next) => {
   
   const features = new APIFeatures(
     Product.find({ 
-      category: category._id,
-      isActive: true 
+      category: category._id
     }),
     req.query
   )
@@ -456,7 +451,6 @@ exports.getProductsByCategory = catchAsync(async (req, res, next) => {
   
   const total = await Product.countDocuments({
     category: category._id,
-    isActive: true,
     ...features.filterQuery
   });
   
@@ -498,8 +492,7 @@ exports.getSimilarProducts = catchAsync(async (req, res, next) => {
       { category: product.category },
       { material: product.material },
       { tags: { $in: product.tags } }
-    ],
-    isActive: true
+    ]
   })
   .limit(8)
   .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
