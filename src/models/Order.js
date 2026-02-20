@@ -46,7 +46,7 @@ const orderSchema = new mongoose.Schema({
   // Payment
   paymentMethod: {
     type: String,
-    enum: ['razorpay', 'cod', 'card', 'wallet', 'netbanking', 'upi'],
+    enum: ['razorpay', 'cod', 'card', 'wallet', 'netbanking', 'upi', 'emi', 'paylater'],
     required: [true, 'Payment method is required']
   },
   paymentStatus: {
@@ -132,6 +132,14 @@ orderSchema.virtual('addresses', {
   ref: 'OrderAddress',
   foreignField: 'order',
   localField: '_id'
+});
+
+// Virtual for payment details
+orderSchema.virtual('payment', {
+  ref: 'Payment',
+  foreignField: 'order',
+  localField: '_id',
+  justOne: true
 });
 
 // Virtual for formatted date
