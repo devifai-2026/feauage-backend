@@ -125,6 +125,17 @@ exports.handlePaymentCallback = catchAsync(async (req, res, next) => {
       order.razorpayPaymentId = razorpay_payment_id;
       order.razorpaySignature = razorpay_signature;
       order.status = 'confirmed';
+
+      // Fetch actual payment method used (upi, card, netbanking, wallet, etc.)
+      try {
+        const paymentDetails = await razorpay.payments.fetch(razorpay_payment_id);
+        if (paymentDetails.method) {
+          order.paymentMethod = paymentDetails.method;
+        }
+      } catch (err) {
+        console.error('Could not fetch payment method from Razorpay:', err.message);
+      }
+
       await order.save();
 
       // Get user for notification
@@ -205,6 +216,17 @@ exports.verifyPayment = catchAsync(async (req, res, next) => {
   order.razorpayPaymentId = razorpay_payment_id;
   order.razorpaySignature = razorpay_signature;
   order.status = 'confirmed'; // Move to confirmed status
+
+  // Fetch actual payment method used (upi, card, netbanking, wallet, etc.)
+  try {
+    const paymentDetails = await razorpay.payments.fetch(razorpay_payment_id);
+    if (paymentDetails.method) {
+      order.paymentMethod = paymentDetails.method;
+    }
+  } catch (err) {
+    console.error('Could not fetch payment method from Razorpay:', err.message);
+  }
+
   await order.save();
 
   // Get user details for notification
@@ -675,6 +697,10 @@ async function handlePaymentCaptured(payload) {
       order.paymentStatus = 'paid';
       order.razorpayPaymentId = payment.entity?.id || payment.id;
       order.status = 'confirmed';
+      // Capture the actual payment method used (upi, card, netbanking, wallet, etc.)
+      if (payment.entity?.method) {
+        order.paymentMethod = payment.entity.method;
+      }
       await order.save();
 
       // Get user for notification

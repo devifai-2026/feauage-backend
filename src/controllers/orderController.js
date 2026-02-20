@@ -102,9 +102,10 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     };
 
     const razorpayOrder = await razorpay.orders.create(options);
-
+    console.log(razorpayOrder,"razorpayOrder")
+    console.log(user,"user")
     // 4) Ensure Razorpay Customer exists for 'Saved Cards' functionality
-    let razorpayCustomerId = user.razorpayCustomerId;
+    let razorpayCustomerId = user.razorpayCustomerId || razorpayOrder.notes.userId;
     if (!razorpayCustomerId) {
       try {
         const customer = await razorpay.customers.create({
@@ -112,6 +113,7 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
           email: user.email,
           contact: user.phone || undefined,
         });
+        console.log(customer,"customer")
         razorpayCustomerId = customer.id;
         user.razorpayCustomerId = razorpayCustomerId;
         await user.save({ validateBeforeSave: false });
