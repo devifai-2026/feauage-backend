@@ -61,7 +61,8 @@ exports.getProduct = catchAsync(async (req, res, next) => {
       }
     });
   
-  if (!product || !product.isActive) {
+  // if (!product || !product.isActive) {
+  if (!product) { 
     return next(new AppError('Product not found', 404));
   }
 
@@ -96,7 +97,7 @@ exports.getProduct = catchAsync(async (req, res, next) => {
   const relatedProducts = await Product.find({
     _id: { $ne: product._id },
     category: product.category,
-    isActive: true
+    // isActive: true
   })
   .limit(4)
   .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
@@ -518,10 +519,11 @@ exports.getSimilarProducts = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getProductFilters = catchAsync(async (req, res, next) => {
   const filters = {
-    materials: await Product.distinct('material', { isActive: true }),
-    categories: await Category.find({ isActive: true }).select('name slug'),
+    materials: await Product.distinct('material'),
+    brands: await Product.distinct('brand'),
+    purities: await Product.distinct('purity'),
+    categories: await Category.find().select('name slug'),
     priceRange: await Product.aggregate([
-      { $match: { isActive: true } },
       {
         $group: {
           _id: null,
