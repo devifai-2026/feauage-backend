@@ -551,7 +551,7 @@ exports.exportOrders = catchAsync(async (req, res, next) => {
     'Phone': order.user.phone,
     'Status': order.status,
     'Payment Status': order.paymentStatus,
-    'Payment Method': order.paymentMethod,
+    'Payment Intent': order.paymentMethod,
     'Subtotal': order.subtotal,
     'Shipping': order.shippingCharge,
     'Tax': order.tax,
