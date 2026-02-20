@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const OrderItem = require('../models/OrderItem');
 const OrderAddress = require('../models/OrderAddress');
+const Payment = require('../models/Payment');
 const Cart = require('../models/Cart');
 const CartItem = require('../models/CartItem');
 const Product = require('../models/Product');
@@ -273,7 +274,7 @@ exports.createOrder = catchAsync(async (req, res, next) => {
 
   // Create order
   const isPaid = (paymentMethod === 'razorpay' && razorpayPaymentId && razorpaySignature);
-  
+
   // Verify Payment if provided
   if (isPaid) {
     const crypto = require('crypto');
@@ -288,6 +289,27 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     }
   }
 
+  // Fetch the actual payment instrument used (upi, card, netbanking, wallet, etc.)
+  let resolvedPaymentMethod = paymentMethod; // default: 'razorpay' or 'cod'
+  let fetchedPaymentDetails = null;
+  if (isPaid && razorpayPaymentId) {
+    try {
+      console.log('[createOrder] Fetching payment details for:', razorpayPaymentId);
+      fetchedPaymentDetails = await razorpay.payments.fetch(razorpayPaymentId);
+      console.log('[createOrder] Razorpay payment details:', JSON.stringify(fetchedPaymentDetails, null, 2));
+      if (fetchedPaymentDetails.method) {
+        resolvedPaymentMethod = fetchedPaymentDetails.method;
+        console.log('[createOrder] Resolved payment method:', resolvedPaymentMethod);
+      } else {
+        console.warn('[createOrder] No method field in payment details');
+      }
+    } catch (err) {
+      console.error('[createOrder] Could not fetch payment method from Razorpay:', err.message, err.statusCode || '');
+    }
+  } else {
+    console.log('[createOrder] Skipping payment fetch — isPaid:', isPaid, '| razorpayPaymentId:', razorpayPaymentId);
+  }
+
   const order = await Order.create({
     user: req.user.id,
     subtotal: cart.cartTotal,
@@ -296,7 +318,7 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     tax,
     grandTotal,
     currency: 'INR',
-    paymentMethod,
+    paymentMethod: resolvedPaymentMethod,
     paymentStatus: isPaid ? 'paid' : 'pending',
     status: isPaid ? 'confirmed' : 'pending',
     promoCode: appliedPromoCodeStr,
@@ -304,6 +326,65 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     razorpayPaymentId,
     razorpaySignature
   });
+
+  // Save Razorpay payment details to Payment collection
+  if (isPaid && fetchedPaymentDetails) {
+    try {
+      const pd = fetchedPaymentDetails;
+      await Payment.create({
+        order: order._id,
+        user: req.user.id,
+        razorpayPaymentId: pd.id,
+        razorpayOrderId: pd.order_id,
+        razorpayCustomerId: pd.customer_id,
+        razorpayTokenId: pd.token_id,
+        amount: pd.amount,
+        amountRefunded: pd.amount_refunded || 0,
+        currency: pd.currency || 'INR',
+        status: pd.status,
+        captured: pd.captured || false,
+        refundStatus: pd.refund_status || null,
+        method: pd.method,
+        international: pd.international || false,
+        card: pd.card ? {
+          id: pd.card.id,
+          name: pd.card.name,
+          last4: pd.card.last4,
+          network: pd.card.network,
+          type: pd.card.type,
+          issuer: pd.card.issuer,
+          international: pd.card.international,
+          emi: pd.card.emi,
+          subType: pd.card.sub_type,
+          tokenIin: pd.card.token_iin
+        } : undefined,
+        cardId: pd.card_id,
+        vpa: pd.vpa,
+        bank: pd.bank,
+        wallet: pd.wallet,
+        email: pd.email,
+        contact: pd.contact,
+        fee: pd.fee || 0,
+        tax: pd.tax || 0,
+        acquirerData: pd.acquirer_data ? {
+          authCode: pd.acquirer_data.auth_code,
+          rrn: pd.acquirer_data.rrn,
+          upiTransactionId: pd.acquirer_data.upi_transaction_id
+        } : undefined,
+        errorCode: pd.error_code,
+        errorDescription: pd.error_description,
+        errorSource: pd.error_source,
+        errorStep: pd.error_step,
+        errorReason: pd.error_reason,
+        description: pd.description,
+        razorpayCreatedAt: pd.created_at,
+        rawResponse: pd
+      });
+    } catch (paymentSaveErr) {
+      console.error('[createOrder] Failed to save payment details:', paymentSaveErr.message);
+      // Non-blocking — order is already created
+    }
+  }
 
   // Create order items
   const orderItems = [];
@@ -447,7 +528,8 @@ exports.createOrder = catchAsync(async (req, res, next) => {
   // Populate order for response
   const populatedOrder = await Order.findById(order._id)
     .populate('items')
-    .populate('addresses');
+    .populate('addresses')
+    .populate('payment');
 
   res.status(201).json({
     status: 'success',
@@ -485,6 +567,7 @@ exports.getUserOrders = catchAsync(async (req, res, next) => {
       }
     })
     .populate('addresses')
+    .populate('payment')
     .sort('-createdAt');
 
   const total = await Order.countDocuments({
@@ -560,7 +643,8 @@ exports.getOrder = catchAsync(async (req, res, next) => {
         }
       }
     })
-    .populate('addresses');
+    .populate('addresses')
+    .populate('payment');
 
   if (!order) {
     return next(new AppError('Order not found', 404));

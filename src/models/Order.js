@@ -134,6 +134,14 @@ orderSchema.virtual('addresses', {
   localField: '_id'
 });
 
+// Virtual for payment details
+orderSchema.virtual('payment', {
+  ref: 'Payment',
+  foreignField: 'order',
+  localField: '_id',
+  justOne: true
+});
+
 // Virtual for formatted date
 orderSchema.virtual('formattedDate').get(function () {
   if (!this.createdAt) return '';

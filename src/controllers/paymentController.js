@@ -109,7 +109,7 @@ exports.handlePaymentCallback = catchAsync(async (req, res, next) => {
     // Redirect to failure page
     return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/payment-status?status=failed&error=Order not found`);
   }
-
+  console.log(req.query,"req.query")
   // If payment was successful
   if (razorpay_payment_link_status === 'paid' && razorpay_payment_id) {
     // Verify signature
@@ -129,6 +129,7 @@ exports.handlePaymentCallback = catchAsync(async (req, res, next) => {
       // Fetch actual payment method used (upi, card, netbanking, wallet, etc.)
       try {
         const paymentDetails = await razorpay.payments.fetch(razorpay_payment_id);
+        console.log(paymentDetails,"paymentDetails")
         if (paymentDetails.method) {
           order.paymentMethod = paymentDetails.method;
         }
