@@ -8,7 +8,8 @@ const {
   getOrderInvoice,
   createPaymentOrder,
   initiatePayment,
-  getRecentActivity
+  getRecentActivity,
+  getUserNames,
 } = require('../controllers/orderController');
 const { protect } = require('../middleware/auth');
 
@@ -16,6 +17,7 @@ const router = express.Router();
 
 // Public routes
 router.get('/recent-activity', getRecentActivity);
+router.get('/user-names', getUserNames);
 
 // All routes require authentication
 router.use(protect);

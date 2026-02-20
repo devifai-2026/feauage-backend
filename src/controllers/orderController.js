@@ -980,6 +980,24 @@ exports.getRecentActivity = catchAsync(async (req, res, next) => {
   });
 });
 
+// @desc    Get all user names (public, for social proof notifications)
+// @route   GET /api/v1/orders/user-names
+// @access  Public
+exports.getUserNames = catchAsync(async (req, res, next) => {
+  const users = await User.find({ isActive: true })
+    .select('firstName lastName')
+    .lean();
+
+  const names = users
+    .filter(u => u.firstName)
+    .map(u => `${u.firstName}${u.lastName ? ' ' + u.lastName.charAt(0) + '.' : ''}`);
+
+  res.status(200).json({
+    status: 'success',
+    data: names
+  });
+});
+
 // Helper function to calculate shipping charge
 function calculateShippingCharge(pincode, orderValue) {
   // Simplified shipping calculation
