@@ -83,11 +83,18 @@ app.use(xss());
 app.use(hpp({
   whitelist: [
     'price',
+    'sellingPrice',
     'rating',
     'category',
+    'subCategory',
     'material',
+    'brand',
+    'purity',
     'gender',
-    'sort'
+    'sort',
+    'size',
+    'page',
+    'limit'
   ]
 }));
 
