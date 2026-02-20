@@ -190,6 +190,15 @@ const seedDatabase = async () => {
         icon: '👔',
         displayOrder: 7,
         createdBy: admin._id
+      },
+      {
+        name: 'Accessories',
+        slug: generateSlug('Accessories'),
+        description: 'Fashion accessories and complementary items',
+        image: 'https://example.com/accessories.jpg',
+        icon: '👜',
+        displayOrder: 8,
+        createdBy: admin._id
       }
     ];
     
@@ -436,7 +445,7 @@ const seedDatabase = async () => {
     console.log('\n📊 Summary:');
     console.log('- Admin user: admin@jewellery.com / Admin@123456');
     console.log('- Sample customer: customer@example.com / Customer@123');
-    console.log('- Categories: 7 created');
+    console.log('- Categories: 8 created');
     console.log('- Subcategories: 3 created');
     console.log('- Products: 3 created');
     console.log('- Coupons: WELCOME10, DIWALI25');
