@@ -13,25 +13,25 @@ const APIFeatures = require('../utils/apiFeatures');
 exports.getAllProducts = catchAsync(async (req, res, next) => {
   // Build query
   const features = new APIFeatures(
-    Product.find({ isActive: true }),
+    Product.find(),
     req.query
   )
     .filter()
+    .search()
     .sort()
     .limitFields()
     .paginate();
   
   // Execute query
   const products = await features.query
-    .populate('category', 'name slug')
-    .populate('subCategory', 'name slug')
-    .populate('images');
+    .populate('category', 'name')
+    .populate('subCategory', 'name')
+    .populate('createdBy', 'firstName lastName')
+    .populate('images')
+    .populate('gemstones');
   
   // Get total count
-  const total = await Product.countDocuments({
-    isActive: true,
-    ...features.filterQuery
-  });
+  const total = await Product.countDocuments(features.filterQuery);
   
   res.status(200).json({
     status: 'success',
@@ -444,6 +444,7 @@ exports.getProductsByCategory = catchAsync(async (req, res, next) => {
     req.query
   )
     .filter()
+    .search()
     .sort()
     .limitFields()
     .paginate();
