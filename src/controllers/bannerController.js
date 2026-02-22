@@ -29,7 +29,8 @@ exports.getBannersByPage = catchAsync(async (req, res, next) => {
 
     const banners = await Banner.find(query)
         .sort('displayOrder')
-        .select('-createdBy -__v');
+        .select('-createdBy -__v')
+        .populate('featuredProduct', 'name sellingPrice basePrice discountValue stockQuantity stockStatus slug _id');
 
     res.status(200).json({
         status: 'success',
@@ -54,7 +55,8 @@ exports.getBannerByName = catchAsync(async (req, res, next) => {
             { endDate: { $gte: new Date() } },
             { endDate: null }
         ]
-    }).select('-createdBy -__v');
+    }).select('-createdBy -__v')
+      .populate('featuredProduct', 'name sellingPrice basePrice discountValue stockQuantity stockStatus slug _id');
 
     if (!banner) {
         return next(new AppError('Banner not found', 404));
@@ -98,7 +100,8 @@ exports.getActiveBanners = catchAsync(async (req, res, next) => {
     const banners = await Banner.find(query)
         .sort('displayOrder')
         .limit(parseInt(limit))
-        .select('-createdBy -__v');
+        .select('-createdBy -__v')
+        .populate('featuredProduct', 'name sellingPrice basePrice discountValue stockQuantity stockStatus slug _id');
 
     res.status(200).json({
         status: 'success',

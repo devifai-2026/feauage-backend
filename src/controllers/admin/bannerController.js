@@ -18,6 +18,7 @@ exports.getAllBanners = catchAsync(async (req, res, next) => {
 
   const banners = await features.query
     .populate('createdBy', 'firstName lastName')
+    .populate('featuredProduct', 'name sellingPrice _id')
     .sort('displayOrder');
 
   const total = await Banner.countDocuments(features.filterQuery);
@@ -37,7 +38,8 @@ exports.getAllBanners = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 exports.getBanner = catchAsync(async (req, res, next) => {
   const banner = await Banner.findById(req.params.id)
-    .populate('createdBy', 'firstName lastName');
+    .populate('createdBy', 'firstName lastName')
+    .populate('featuredProduct', 'name sellingPrice basePrice discountValue stockQuantity stockStatus slug _id');
 
   if (!banner) {
     return next(new AppError('Banner not found', 404));

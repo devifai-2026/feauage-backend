@@ -146,6 +146,11 @@ const bannerSchema = new mongoose.Schema({
     max: [100, 'Discount cannot exceed 100%'],
     default: 0
   },
+  featuredProduct: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product',
+    default: null
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
