@@ -243,9 +243,16 @@ exports.searchProducts = catchAsync(async (req, res, next) => {
   
   const query = { isActive: true };
   
-  // Text search
+  // Partial/substring text search using regex (supports "pla" → "platinum")
   if (q) {
-    query.$text = { $search: q };
+    const regex = new RegExp(q, 'i');
+    query.$or = [
+      { name: regex },
+      { shortDescription: regex },
+      { material: regex },
+      { brand: regex },
+      { tags: regex },
+    ];
   }
   
   // Category filter
