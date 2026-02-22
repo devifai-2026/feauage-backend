@@ -38,6 +38,7 @@ const {
   updateCategory,
   deleteCategory,
   getSubCategories,
+  getSubCategory,
   createSubCategory,
   updateSubCategory,
   deleteSubCategory,
@@ -191,6 +192,7 @@ router.get("/subcategories", getSubCategories);
 router.post("/subcategories", createSubCategory);
 router
   .route("/subcategories/:id")
+  .get(getSubCategory)
   .patch(updateSubCategory)
   .delete(deleteSubCategory);
 
