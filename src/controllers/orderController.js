@@ -525,6 +525,13 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     }
   }
 
+  // For already-paid Razorpay orders, trigger shipment creation asynchronously
+  if (isPaid) {
+    shippingService.processShipmentForOrder(order._id).catch(err => {
+      console.error('Paid order Shiprocket shipment failed:', err.message);
+    });
+  }
+
   // Populate order for response
   const populatedOrder = await Order.findById(order._id)
     .populate('items')
@@ -708,13 +715,7 @@ exports.cancelOrder = catchAsync(async (req, res, next) => {
   // Cancel Shiprocket shipment if exists
   if (order.shiprocketOrderId) {
     try {
-      // If we have a shipment ID, use that, otherwise we might need to use order ID (but cancelShipment usually takes shipment ID or AWB)
-      // The shippingService.cancelShipment takes shipmentId.
-      if (order.shiprocketAWB) {
-        await shippingService.cancelShipment(order.shiprocketAWB); // Verify if cancelShipment takes AWB or Shipment ID. Service says shipmentId
-      } else if (order.shiprocketShipmentId) {
-        await shippingService.cancelShipment(order.shiprocketShipmentId);
-      }
+      await shippingService.cancelShipment(order.shiprocketOrderId);
     } catch (error) {
       console.error('Shiprocket cancellation failed:', error.message);
     }

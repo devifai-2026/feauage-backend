@@ -19,21 +19,16 @@ const shippingService = new ShippingService();
 // @access  Private/Admin
 
 exports.getAllOrders = catchAsync(async (req, res, next) => {
-  console.log("=== getAllOrders Debug ===");
-  console.log("Query parameters:", req.query);
-  
   // Create base query
   let baseQuery = Order.find();
-  
+
   // Apply APIFeatures
   const features = new APIFeatures(baseQuery, req.query)
     .filter()
     .sort()
     .limitFields()
     .paginate();
-  
-  console.log("Final filter query:", features.filterQuery);
-  
+
   // Execute query with population
   const orders = await features.query
     .populate({
@@ -49,21 +44,10 @@ exports.getAllOrders = catchAsync(async (req, res, next) => {
       }
     })
     .populate('addresses');
-  
-  console.log("Found orders:", orders.length);
-  
+
   // Get total count
   const total = await Order.countDocuments(features.filterQuery);
-  console.log("Total count with filter:", total);
-  
-  // Debug: Also check total without any filters
-  const totalAll = await Order.countDocuments({});
-  console.log("Total orders in DB:", totalAll);
-  
-  // Debug: Check if we can find the order directly
-  const testOrder = await Order.findById("694197052cf79abed2bbfeb9");
-  console.log("Test order found:", testOrder ? "Yes" : "No");
-  
+
   res.status(200).json({
     status: 'success',
     results: orders.length,
@@ -1290,7 +1274,7 @@ exports.getAvailableCouriers = catchAsync(async (req, res, next) => {
   const weight = req.query.weight || 0.5;
 
   // Pickup pincode (your warehouse/store pincode)
-  const pickupPincode = process.env.PICKUP_PINCODE || '400001';
+  const pickupPincode = process.env.SHIPROCKET_PICKUP_PINCODE || '400001';
 
   try {
     const couriers = await shippingService.getAvailableCouriers(
@@ -1529,8 +1513,8 @@ exports.cancelShipment = catchAsync(async (req, res, next) => {
     return next(new AppError('Order not found', 404));
   }
 
-  if (!order.shiprocketShipmentId) {
-    return next(new AppError('No shipment found for this order', 400));
+  if (!order.shiprocketOrderId) {
+    return next(new AppError('No Shiprocket order found for this order', 400));
   }
 
   // Check if shipment can be cancelled (not delivered)
@@ -1539,7 +1523,7 @@ exports.cancelShipment = catchAsync(async (req, res, next) => {
   }
 
   try {
-    await shippingService.cancelShipment(order.shiprocketShipmentId);
+    await shippingService.cancelShipment(order.shiprocketOrderId);
 
     // Update order
     order.shippingStatus = 'cancelled';
@@ -1554,7 +1538,7 @@ exports.cancelShipment = catchAsync(async (req, res, next) => {
       entityId: order._id,
       metadata: {
         orderId: order.orderId,
-        shiprocketShipmentId: order.shiprocketShipmentId,
+        shiprocketOrderId: order.shiprocketOrderId,
         reason
       },
       ipAddress: req.ip,
@@ -1626,7 +1610,7 @@ exports.getShippingChargesEstimate = catchAsync(async (req, res, next) => {
     return next(new AppError('Shipping address not found', 400));
   }
 
-  const pickupPincode = process.env.PICKUP_PINCODE || '400001';
+  const pickupPincode = process.env.SHIPROCKET_PICKUP_PINCODE || '400001';
 
   try {
     const chargesResponse = await shippingService.getShippingCharges(

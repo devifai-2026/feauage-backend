@@ -43,7 +43,7 @@ exports.createPaymentLink = catchAsync(async (req, res, next) => {
 
   // Create Razorpay Payment Link
   const paymentLinkData = {
-    amount: Math.round(order.grandTotal * 100), // Amount in paise
+    amount: Math.round(order.grandTotal * 100), // Amount  in paise
     currency: 'INR',
     accept_partial: false,
     description: `Payment for Order #${order.orderId}`,
@@ -795,7 +795,7 @@ async function handleRefundProcessed(payload) {
 // =====================================================
 
 // @desc    Handle Shiprocket webhook events
-// @route   POST /api/v1/webhooks/shiprocket
+// @route   POST /api/v1/webhooks/shipping-updates
 // @access  Public (called by Shiprocket)
 exports.handleShiprocketWebhook = catchAsync(async (req, res, next) => {
   const webhookToken = req.headers['x-api-key'] || req.query.token;

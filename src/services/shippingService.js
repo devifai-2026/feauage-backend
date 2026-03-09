@@ -16,7 +16,7 @@ class ShippingService {
       });
 
       this.token = response.data.token;
-      this.tokenExpiry = Date.now() + (24 * 60 * 60 * 1000); // 24 hours
+      this.tokenExpiry = Date.now() + (230 * 60 * 60 * 1000); // 230 hours (token valid 240h)
 
       return this.token;
     } catch (error) {
@@ -112,12 +112,14 @@ class ShippingService {
     }
   }
 
-  // Cancel shipment
-  async cancelShipment(shipmentId) {
+  // Cancel order/shipment by Shiprocket order ID
+  async cancelShipment(shiprocketOrderId) {
     try {
       const headers = await this.getHeaders();
 
-      const response = await axios.post(`${this.baseURL}/orders/cancel/shipment/${shipmentId}`, {}, { headers });
+      const response = await axios.post(`${this.baseURL}/orders/cancel`, {
+        ids: [shiprocketOrderId]
+      }, { headers });
 
       return response.data;
     } catch (error) {
@@ -131,12 +133,16 @@ class ShippingService {
     try {
       const headers = await this.getHeaders();
 
-      const response = await axios.post(`${this.baseURL}/courier/serviceability`, {
-        pickup_postcode: pickupPostcode,
-        delivery_postcode: deliveryPostcode,
-        weight,
-        ...dimensions
-      }, { headers });
+      const response = await axios.get(`${this.baseURL}/courier/serviceability/`, {
+        params: {
+          pickup_postcode: pickupPostcode,
+          delivery_postcode: deliveryPostcode,
+          weight,
+          cod: 0,
+          ...dimensions
+        },
+        headers
+      });
 
       return response.data;
     } catch (error) {
@@ -200,6 +206,50 @@ class ShippingService {
     }
   }
 
+  // Static helper: build Shiprocket order payload from order, items, and shipping address
+  static createOrderData(order, orderItems, shippingAddress) {
+    const pickupLocation = process.env.SHIPROCKET_PICKUP_LOCATION || 'Primary';
+    const nameParts = (shippingAddress.name || '').split(' ');
+
+    return {
+      order_id: order.orderId,
+      order_date: new Date(order.createdAt).toISOString().split('T')[0],
+      pickup_location: pickupLocation,
+      channel_id: '',
+      comment: `Order from Feauage Jewelry - ${order.orderId}`,
+      billing_customer_name: nameParts[0] || 'Customer',
+      billing_last_name: nameParts.slice(1).join(' ') || '',
+      billing_address: shippingAddress.addressLine1,
+      billing_address_2: shippingAddress.landmark || '',
+      billing_city: shippingAddress.city,
+      billing_pincode: shippingAddress.pincode,
+      billing_state: shippingAddress.state,
+      billing_country: shippingAddress.country || 'India',
+      billing_email: shippingAddress.email || '',
+      billing_phone: shippingAddress.phone,
+      shipping_is_billing: true,
+      order_items: orderItems.map(item => ({
+        name: item.productName || 'Jewelry Item',
+        sku: item.sku || `SKU-${item._id}`,
+        units: item.quantity,
+        selling_price: item.price,
+        discount: '',
+        tax: '',
+        hsn: 7113 // HSN code for jewelry
+      })),
+      payment_method: order.paymentMethod === 'cod' ? 'COD' : 'Prepaid',
+      shipping_charges: order.shippingCharge || 0,
+      giftwrap_charges: 0,
+      transaction_charges: 0,
+      total_discount: order.discount || 0,
+      sub_total: order.subtotal,
+      length: 10,
+      breadth: 10,
+      height: 5,
+      weight: 0.3 // Default weight for jewelry (kg)
+    };
+  }
+
   // Print label
   async printLabel(shipmentIds) {
     try {
@@ -252,46 +302,8 @@ class ShippingService {
       }
 
       // 2. Prepare Shiprocket Order Payload
-      const pickupLocation = process.env.SHIPROCKET_PICKUP_LOCATION || 'Primary';
-      console.log(`[ShippingService] Creating Shiprocket order for ${order.orderId} from ${pickupLocation}`);
-
-      const shiprocketOrderData = {
-        order_id: order.orderId,
-        order_date: new Date(order.createdAt).toISOString().split('T')[0],
-        pickup_location: pickupLocation,
-        channel_id: '',
-        comment: `Order from Feauage Jewelry - ${order.orderId}`,
-        billing_customer_name: shippingAddress.name?.split(' ')[0] || 'Customer',
-        billing_last_name: shippingAddress.name?.split(' ').slice(1).join(' ') || '',
-        billing_address: shippingAddress.addressLine1,
-        billing_address_2: shippingAddress.landmark || '',
-        billing_city: shippingAddress.city,
-        billing_pincode: shippingAddress.pincode,
-        billing_state: shippingAddress.state,
-        billing_country: shippingAddress.country || 'India',
-        billing_email: shippingAddress.email || '',
-        billing_phone: shippingAddress.phone,
-        shipping_is_billing: true,
-        order_items: orderItems.map(item => ({
-          name: item.productName || 'Jewelry Item',
-          sku: item.sku || `SKU-${item._id}`,
-          units: item.quantity,
-          selling_price: item.price,
-          discount: '',
-          tax: '',
-          hsn: 7113 // HSN code for jewelry
-        })),
-        payment_method: order.paymentMethod === 'cod' ? 'COD' : 'Prepaid',
-        shipping_charges: order.shippingCharge || 0,
-        giftwrap_charges: 0,
-        transaction_charges: 0,
-        total_discount: order.discount || 0,
-        sub_total: order.subtotal,
-        length: 10,
-        breadth: 10,
-        height: 5,
-        weight: 0.3 // Default weight for jewelry
-      };
+      console.log(`[ShippingService] Creating Shiprocket order for ${order.orderId} from ${process.env.SHIPROCKET_PICKUP_LOCATION || 'Primary'}`);
+      const shiprocketOrderData = ShippingService.createOrderData(order, orderItems, shippingAddress);
 
       // 3. Create Order in Shiprocket
       let shiprocketOrder;
