@@ -168,6 +168,24 @@ exports.notifyLowStock = async (productId) => {
   }
 };
 
+// Notify admins about a shipping issue (no couriers, stuck shipment, etc.)
+exports.notifyShippingIssue = (orderId, orderDbId, userId, issue) => {
+  if (io) {
+    const data = {
+      type: 'shipping_issue',
+      orderId,
+      orderDbId,
+      userId,
+      issue,
+      timestamp: new Date()
+    };
+    io.to('admin-room').emit('shipping_issue', data);
+    if (userId) {
+      io.to(`user-${userId}`).emit('shipping_issue_user', data);
+    }
+  }
+};
+
 // Notify payment received
 exports.notifyPaymentReceived = async (orderId, paymentId) => {
   try {

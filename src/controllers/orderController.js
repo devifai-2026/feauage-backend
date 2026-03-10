@@ -103,10 +103,8 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     };
 
     const razorpayOrder = await razorpay.orders.create(options);
-    console.log(razorpayOrder,"razorpayOrder")
-    console.log(user,"user")
     // 4) Ensure Razorpay Customer exists for 'Saved Cards' functionality
-    let razorpayCustomerId = user.razorpayCustomerId || razorpayOrder.notes.userId;
+    let razorpayCustomerId = user.razorpayCustomerId || null;
     if (!razorpayCustomerId) {
       try {
         const customer = await razorpay.customers.create({
@@ -114,7 +112,6 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
           email: user.email,
           contact: user.phone || undefined,
         });
-        console.log(customer,"customer")
         razorpayCustomerId = customer.id;
         user.razorpayCustomerId = razorpayCustomerId;
         await user.save({ validateBeforeSave: false });
@@ -163,6 +160,10 @@ exports.createOrder = catchAsync(async (req, res, next) => {
   // 1) Validation
   if (!paymentMethod) {
     return next(new AppError('Payment method is required', 400));
+  }
+
+  if (paymentMethod === 'cod') {
+    return next(new AppError('Cash on delivery is not available. Please pay online.', 400));
   }
 
   // Check authentication
@@ -294,20 +295,13 @@ exports.createOrder = catchAsync(async (req, res, next) => {
   let fetchedPaymentDetails = null;
   if (isPaid && razorpayPaymentId) {
     try {
-      console.log('[createOrder] Fetching payment details for:', razorpayPaymentId);
       fetchedPaymentDetails = await razorpay.payments.fetch(razorpayPaymentId);
-      console.log('[createOrder] Razorpay payment details:', JSON.stringify(fetchedPaymentDetails, null, 2));
       if (fetchedPaymentDetails.method) {
         resolvedPaymentMethod = fetchedPaymentDetails.method;
-        console.log('[createOrder] Resolved payment method:', resolvedPaymentMethod);
-      } else {
-        console.warn('[createOrder] No method field in payment details');
       }
     } catch (err) {
-      console.error('[createOrder] Could not fetch payment method from Razorpay:', err.message, err.statusCode || '');
+      console.error('[createOrder] Could not fetch payment method from Razorpay:', err.message);
     }
-  } else {
-    console.log('[createOrder] Skipping payment fetch — isPaid:', isPaid, '| razorpayPaymentId:', razorpayPaymentId);
   }
 
   const order = await Order.create({
@@ -494,7 +488,7 @@ exports.createOrder = catchAsync(async (req, res, next) => {
 
   // Create Razorpay order for online payments if not already paid
   let razorpayOrder = null;
-  if (paymentMethod !== 'cod' && !isPaid) {
+  if (!isPaid) {
     try {
       const options = {
         amount: Math.round(grandTotal * 100), // Amount in paise
@@ -515,22 +509,9 @@ exports.createOrder = catchAsync(async (req, res, next) => {
       // Continue without Razorpay order - order is still created
       console.error('Razorpay order creation failed:', error);
     }
-  } else if (paymentMethod === 'cod') {
-    // For COD, create Shiprocket shipment immediately
-    try {
-      await shippingService.processShipmentForOrder(order._id);
-    } catch (error) {
-      console.error('COD Shipment creation failed:', error.message);
-      // Don't fail the order creation, but log the error
-    }
   }
 
-  // For already-paid Razorpay orders, trigger shipment creation asynchronously
-  if (isPaid) {
-    shippingService.processShipmentForOrder(order._id).catch(err => {
-      console.error('Paid order Shiprocket shipment failed:', err.message);
-    });
-  }
+  // Shipment creation is handled by the Razorpay webhook (payment.captured event)
 
   // Populate order for response
   const populatedOrder = await Order.findById(order._id)
@@ -903,6 +884,26 @@ exports.trackOrder = catchAsync(async (req, res, next) => {
     data: {
       tracking: trackingInfo
     }
+  });
+});
+
+// @desc    Check delivery serviceability for a pincode (pre-payment check)
+// @route   POST /api/v1/orders/check-serviceability
+// @access  Private
+exports.checkServiceability = catchAsync(async (req, res, next) => {
+  const { pincode } = req.body;
+
+  if (!pincode || typeof pincode !== 'string' || pincode.replace(/\D/g, '').length < 6) {
+    return next(new AppError('A valid 6-digit pincode is required', 400));
+  }
+
+  const cleanPincode = pincode.replace(/\D/g, '').slice(0, 6);
+
+  const result = await shippingService.checkServiceability(cleanPincode);
+
+  res.status(200).json({
+    status: 'success',
+    data: result
   });
 });
 

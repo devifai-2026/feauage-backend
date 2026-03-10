@@ -109,7 +109,6 @@ exports.handlePaymentCallback = catchAsync(async (req, res, next) => {
     // Redirect to failure page
     return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/payment-status?status=failed&error=Order not found`);
   }
-  console.log(req.query,"req.query")
   // If payment was successful
   if (razorpay_payment_link_status === 'paid' && razorpay_payment_id) {
     // Verify signature
@@ -129,7 +128,6 @@ exports.handlePaymentCallback = catchAsync(async (req, res, next) => {
       // Fetch actual payment method used (upi, card, netbanking, wallet, etc.)
       try {
         const paymentDetails = await razorpay.payments.fetch(razorpay_payment_id);
-        console.log(paymentDetails,"paymentDetails")
         if (paymentDetails.method) {
           order.paymentMethod = paymentDetails.method;
         }
@@ -149,11 +147,6 @@ exports.handlePaymentCallback = catchAsync(async (req, res, next) => {
         amount: order.grandTotal,
         userId: order.user,
         userName: user?.fullName || 'Customer'
-      });
-
-      // Create Shiprocket shipment asynchronously
-      shippingService.processShipmentForOrder(order._id).catch(err => {
-        console.error('Failed to create Shiprocket shipment:', err.message);
       });
 
       // Redirect to success page
@@ -242,10 +235,7 @@ exports.verifyPayment = catchAsync(async (req, res, next) => {
     userName: user.fullName
   });
 
-  // Create Shiprocket shipment asynchronously (don't block response)
-  shippingService.processShipmentForOrder(order._id).catch(err => {
-    console.error('Failed to create Shiprocket shipment:', err.message);
-  });
+  // Shipment creation is handled by the Razorpay webhook (payment.captured event)
 
   res.status(200).json({
     status: 'success',
@@ -392,6 +382,25 @@ exports.createRefund = catchAsync(async (req, res, next) => {
 
     order.status = 'refunded';
     await order.save();
+
+    // Cancel / initiate return on Shiprocket
+    if (order.shiprocketOrderId) {
+      // If not yet shipped, cancel the shipment
+      if (!['shipped', 'delivered'].includes(order.shippingStatus)) {
+        shippingService.cancelShipment(order.shiprocketOrderId).then(() => {
+          console.log(`[Shiprocket] ✅ Shipment cancelled on refund for order ${order.orderId}`);
+        }).catch(err => {
+          console.error(`[Shiprocket] ❌ Failed to cancel shipment on refund for order ${order.orderId}:`, err.message);
+        });
+      } else {
+        // Already shipped — create return/RTO shipment
+        shippingService.createReturnShipment(order.shiprocketOrderId, reason || 'Refund requested').then(() => {
+          console.log(`[Shiprocket] ✅ Return shipment initiated for order ${order.orderId}`);
+        }).catch(err => {
+          console.error(`[Shiprocket] ❌ Failed to create return shipment for order ${order.orderId}:`, err.message);
+        });
+      }
+    }
 
     // Get user for notification
     const user = await User.findById(order.user);
@@ -591,11 +600,9 @@ exports.processS2SCardPayment = catchAsync(async (req, res, next) => {
         userName: user.fullName || `${user.firstName} ${user.lastName}`
       });
 
-      // Create Shiprocket shipment asynchronously
-      shippingService.processShipmentForOrder(order._id).catch(err => {
-        console.error('Failed to create Shiprocket shipment:', err.message);
-      });
     }
+
+    // Shipment creation is handled by the Razorpay webhook (payment.captured event)
 
     res.status(200).json({
       status: 'success',
@@ -669,10 +676,7 @@ exports.handleS2SCallback = catchAsync(async (req, res, next) => {
         userName: user?.fullName || 'Customer'
       });
 
-      // Create Shiprocket shipment asynchronously
-      shippingService.processShipmentForOrder(order._id).catch(err => {
-        console.error('Failed to create Shiprocket shipment:', err.message);
-      });
+      // Shipment creation is handled by the Razorpay webhook (payment.captured event)
 
       return res.redirect(`${frontendUrl}/payment-status?status=success&orderId=${order.orderId}`);
     }
@@ -784,10 +788,7 @@ async function handleRefundCreated(payload) {
 }
 
 async function handleRefundProcessed(payload) {
-  const { refund } = payload;
-
-  // Log refund processed
-  console.log('Refund processed:', refund.id);
+  // Refund processed — no action needed beyond webhook acknowledgement
 }
 
 // =====================================================
@@ -798,12 +799,12 @@ async function handleRefundProcessed(payload) {
 // @route   POST /api/v1/webhooks/shipping-updates
 // @access  Public (called by Shiprocket)
 exports.handleShiprocketWebhook = catchAsync(async (req, res, next) => {
-  const webhookToken = req.headers['x-api-key'] || req.query.token;
-
-  // Verify webhook token (optional but recommended)
-  if (process.env.SHIPROCKET_WEBHOOK_SECRET && webhookToken !== process.env.SHIPROCKET_WEBHOOK_SECRET) {
-    console.warn('Shiprocket webhook: Invalid token');
-    // Still process but log warning - Shiprocket doesn't always send consistent auth
+  // Verify Shiprocket webhook token (passed as x-api-key header per Shiprocket docs)
+  if (process.env.SHIPROCKET_WEBHOOK_SECRET) {
+    const webhookToken = req.headers['x-api-key'];
+    if (webhookToken !== process.env.SHIPROCKET_WEBHOOK_SECRET) {
+      return next(new AppError('Invalid webhook token', 401));
+    }
   }
 
   const payload = req.body;
@@ -842,7 +843,6 @@ exports.handleShiprocketWebhook = catchAsync(async (req, res, next) => {
   }
 
   if (!order) {
-    console.log('Shiprocket webhook: Order not found for AWB/OrderId:', awb, shiprocketOrderId);
     // Return success anyway to prevent retries
     return res.status(200).json({ status: 'success', message: 'Order not found, webhook acknowledged' });
   }
@@ -933,8 +933,6 @@ exports.handleShiprocketWebhook = catchAsync(async (req, res, next) => {
       userId: order.user
     });
   }
-
-  console.log(`Shiprocket webhook processed: Order ${order.orderId}, Status: ${currentStatus} (${statusId})`);
 
   res.status(200).json({
     status: 'success',

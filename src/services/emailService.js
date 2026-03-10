@@ -1,13 +1,15 @@
-const AWS = require('aws-sdk');
+const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
 const ejs = require('ejs');
 const fs = require('fs');
 const path = require('path');
 
-// Configure AWS SES
-const ses = new AWS.SES({
+// Configure AWS SES (v3)
+const ses = new SESClient({
   region: process.env.AWS_SES_REGION || 'ap-south-1',
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
 });
 
 class Email {
@@ -24,14 +26,14 @@ class Email {
       // Read email template
       const templatePath = path.join(__dirname, '../templates/emails', `${template}.ejs`);
       const templateContent = fs.readFileSync(templatePath, 'utf-8');
-      
+
       // Render template with data
       const html = ejs.render(templateContent, {
         firstName: this.firstName,
         url: this.url,
         ...data
       });
-      
+
       // Define email params
       const params = {
         Source: this.from,
@@ -55,11 +57,11 @@ class Email {
           }
         }
       };
-      
+
       // Send email via SES
-      const response = await ses.sendEmail(params).promise();
+      const response = await ses.send(new SendEmailCommand(params));
       console.log('Email sent successfully:', response.MessageId);
-      
+
       return response;
     } catch (error) {
       console.error('Error sending email:', error);
@@ -126,7 +128,7 @@ class Email {
         type: 'orderShipped',
         order,
         trackingNumber,
-        estimatedDelivery: order.estimatedDelivery 
+        estimatedDelivery: order.estimatedDelivery
           ? new Date(order.estimatedDelivery).toLocaleDateString()
           : 'Soon'
       }
@@ -190,8 +192,8 @@ class Email {
         }
       }
     };
-    
-    await ses.sendEmail(params).promise();
+
+    await ses.send(new SendEmailCommand(params));
   }
 }
 
