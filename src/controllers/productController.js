@@ -13,25 +13,25 @@ const APIFeatures = require('../utils/apiFeatures');
 exports.getAllProducts = catchAsync(async (req, res, next) => {
   // Build query
   const features = new APIFeatures(
-    Product.find({ isActive: true }),
+    Product.find(),
     req.query
   )
     .filter()
+    .search()
     .sort()
     .limitFields()
     .paginate();
   
   // Execute query
   const products = await features.query
-    .populate('category', 'name slug')
-    .populate('subCategory', 'name slug')
-    .populate('images');
+    .populate('category', 'name')
+    .populate('subCategory', 'name')
+    .populate('createdBy', 'firstName lastName')
+    .populate('images')
+    .populate('gemstones');
   
   // Get total count
-  const total = await Product.countDocuments({
-    isActive: true,
-    ...features.filterQuery
-  });
+  const total = await Product.countDocuments(features.filterQuery);
   
   res.status(200).json({
     status: 'success',
@@ -61,7 +61,8 @@ exports.getProduct = catchAsync(async (req, res, next) => {
       }
     });
   
-  if (!product || !product.isActive) {
+  // if (!product || !product.isActive) {
+  if (!product) { 
     return next(new AppError('Product not found', 404));
   }
 
@@ -96,7 +97,7 @@ exports.getProduct = catchAsync(async (req, res, next) => {
   const relatedProducts = await Product.find({
     _id: { $ne: product._id },
     category: product.category,
-    isActive: true
+    // isActive: true
   })
   .limit(4)
   .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
@@ -241,7 +242,7 @@ exports.getProductReviews = catchAsync(async (req, res, next) => {
 exports.searchProducts = catchAsync(async (req, res, next) => {
   const { q, category, minPrice, maxPrice, material, gender, sort, page = 1, limit = 20 } = req.query;
   
-  const query = { isActive: true };
+  const query = {};
   
   // Partial/substring text search using regex (supports "pla" → "platinum")
   if (q) {
@@ -352,7 +353,6 @@ exports.searchProducts = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getFeaturedProducts = catchAsync(async (req, res, next) => {
   const products = await Product.find({
-    isActive: true,
     isFeatured: true
   })
   .limit(10)
@@ -373,7 +373,6 @@ exports.getFeaturedProducts = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getNewArrivals = catchAsync(async (req, res, next) => {
   const products = await Product.find({
-    isActive: true,
     isNewArrival: true
   })
   .limit(10)
@@ -394,7 +393,6 @@ exports.getNewArrivals = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getBestSellers = catchAsync(async (req, res, next) => {
   const products = await Product.find({
-    isActive: true,
     isBestSeller: true
   })
   .limit(10)
@@ -415,7 +413,6 @@ exports.getBestSellers = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getProductsOnSale = catchAsync(async (req, res, next) => {
   const products = await Product.find({
-    isActive: true,
     isOnOffer: true,
     offerStartDate: { $lte: new Date() },
     offerEndDate: { $gte: new Date() }
@@ -445,12 +442,12 @@ exports.getProductsByCategory = catchAsync(async (req, res, next) => {
   
   const features = new APIFeatures(
     Product.find({ 
-      category: category._id,
-      isActive: true 
+      category: category._id
     }),
     req.query
   )
     .filter()
+    .search()
     .sort()
     .limitFields()
     .paginate();
@@ -461,7 +458,6 @@ exports.getProductsByCategory = catchAsync(async (req, res, next) => {
   
   const total = await Product.countDocuments({
     category: category._id,
-    isActive: true,
     ...features.filterQuery
   });
   
@@ -503,8 +499,7 @@ exports.getSimilarProducts = catchAsync(async (req, res, next) => {
       { category: product.category },
       { material: product.material },
       { tags: { $in: product.tags } }
-    ],
-    isActive: true
+    ]
   })
   .limit(8)
   .select('name slug sellingPrice offerPrice isOnOffer images ratingAverage stockStatus stockQuantity')
@@ -524,10 +519,11 @@ exports.getSimilarProducts = catchAsync(async (req, res, next) => {
 // @access  Public
 exports.getProductFilters = catchAsync(async (req, res, next) => {
   const filters = {
-    materials: await Product.distinct('material', { isActive: true }),
-    categories: await Category.find({ isActive: true }).select('name slug'),
+    materials: await Product.distinct('material'),
+    brands: await Product.distinct('brand'),
+    purities: await Product.distinct('purity'),
+    categories: await Category.find().select('name slug'),
     priceRange: await Product.aggregate([
-      { $match: { isActive: true } },
       {
         $group: {
           _id: null,

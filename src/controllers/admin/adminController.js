@@ -615,10 +615,52 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
             progress: currentMonthTarget.progress || 0,
             isActive: currentMonthTarget.isActive
           } : null,
-          daysElapsed: hasValidTarget ? {
-            total: Math.ceil((new Date(currentMonthTarget.endDate) - new Date(currentMonthTarget.startDate)) / (1000 * 60 * 60 * 24)),
-            remaining: Math.max(0, Math.ceil((new Date(currentMonthTarget.endDate) - nowIST) / (1000 * 60 * 60 * 24)))
-          } : { total: 30, remaining: 30 - nowIST.getDate() }
+          daysElapsed: hasValidTarget ? (() => {
+            const rawStart = new Date(currentMonthTarget.startDate);
+            const startStr = new Date(rawStart.getTime() + (5.5 * 60 * 60 * 1000));
+            const targetPeriod = currentMonthTarget.period || 'monthly';
+            const sYear = startStr.getUTCFullYear();
+            const sMonth = startStr.getUTCMonth();
+            const sDate = startStr.getUTCDate();
+            
+            const startNorm = new Date(Date.UTC(sYear, sMonth, sDate));
+            let endNorm;
+            
+            if (targetPeriod === 'monthly') {
+              endNorm = new Date(Date.UTC(sYear, sMonth + 1, 0));
+            } else if (targetPeriod === 'quarterly') {
+              const q = Math.floor(sMonth / 3);
+              endNorm = new Date(Date.UTC(sYear, (q + 1) * 3, 0));
+            } else if (targetPeriod === 'half-yearly') {
+              const h = sMonth < 6 ? 0 : 6;
+              endNorm = new Date(Date.UTC(sYear, h + 6, 0));
+            } else if (targetPeriod === 'yearly' || targetPeriod === 'annually') {
+              endNorm = new Date(Date.UTC(sYear, 12, 0));
+            } else {
+              const rawEnd = new Date(currentMonthTarget.endDate);
+              if (rawEnd.getUTCHours() === 0 && rawEnd.getUTCMinutes() === 0) {
+                 endNorm = new Date(rawEnd.getTime() - 1);
+              } else {
+                 endNorm = rawEnd;
+              }
+              endNorm = new Date(Date.UTC(endNorm.getUTCFullYear(), endNorm.getUTCMonth(), endNorm.getUTCDate()));
+            }
+            
+            const nowNorm = new Date(Date.UTC(nowIST.getUTCFullYear(), nowIST.getUTCMonth(), nowIST.getUTCDate()));
+            
+            const t = Math.round((endNorm - startNorm) / (1000 * 60 * 60 * 24)) + 1;
+            const elap = Math.round((nowNorm - startNorm) / (1000 * 60 * 60 * 24)) + 1;
+            const rem = Math.max(0, t - elap);
+            
+            return { total: t, remaining: rem };
+          })() : (() => {
+            const tempNow = new Date(Date.UTC(nowIST.getUTCFullYear(), nowIST.getUTCMonth(), nowIST.getUTCDate()));
+            const startOfM = new Date(Date.UTC(tempNow.getUTCFullYear(), tempNow.getUTCMonth(), 1));
+            const endOfM = new Date(Date.UTC(tempNow.getUTCFullYear(), tempNow.getUTCMonth() + 1, 0));
+            const t = endOfM.getUTCDate();
+            const elap = tempNow.getUTCDate();
+            return { total: t, remaining: Math.max(0, t - elap) };
+          })()
         },
 
         // Target statistics
@@ -1935,8 +1977,8 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
     };
 
     const nowIST = getISTDate();
-    const currentYear = nowIST.getFullYear();
-    const currentMonth = nowIST.getMonth(); // 0-indexed (0 = Jan, 1 = Feb, ...)
+    const currentYear = nowIST.getUTCFullYear();
+    const currentMonth = nowIST.getUTCMonth(); // 0-indexed (0 = Jan, 1 = Feb, ...)
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
     let monthsToShow, labels, monthsData;
@@ -1989,8 +2031,9 @@ exports.getRevenueOverview = catchAsync(async (req, res, next) => {
         targetType: 'revenue',
         period: 'monthly',
         isActive: true,
-        startDate: { $lte: nowIST },
-        endDate: { $gte: nowIST }
+        startDate: { $lte: targetEndDate },
+        endDate: { $gte: targetStartDate },
+        status: { $in: ['active', 'completed'] }
       }).sort({ createdAt: -1 });
     } catch (error) {
       console.error('Error fetching current month target:', error);

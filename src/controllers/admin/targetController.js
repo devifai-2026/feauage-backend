@@ -341,29 +341,34 @@ exports.getMonthlyRevenueProgress = catchAsync(async (req, res, next) => {
   const { period = 'monthly' } = req.query;
   const now = new Date();
   let startDate, endDate, lastPeriodStart, lastPeriodEnd;
+  // Convert to IST timezone (UTC+5:30)
+  const nowIST = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+  
+  const istYear = nowIST.getUTCFullYear();
+  const istMonth = nowIST.getUTCMonth();
 
   if (period === 'monthly') {
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    lastPeriodStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    lastPeriodEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+    startDate = new Date(Date.UTC(istYear, istMonth, 1, 0, 0, 0, 0));
+    endDate = new Date(Date.UTC(istYear, istMonth + 1, 0, 23, 59, 59, 999));
+    lastPeriodStart = new Date(Date.UTC(istYear, istMonth - 1, 1, 0, 0, 0, 0));
+    lastPeriodEnd = new Date(Date.UTC(istYear, istMonth, 0, 23, 59, 59, 999));
   } else if (period === 'quarterly') {
-    const quarter = Math.floor(now.getMonth() / 3);
-    startDate = new Date(now.getFullYear(), quarter * 3, 1);
-    endDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0);
-    lastPeriodStart = new Date(now.getFullYear(), (quarter - 1) * 3, 1);
-    lastPeriodEnd = new Date(now.getFullYear(), quarter * 3, 0);
+    const quarter = Math.floor(istMonth / 3);
+    startDate = new Date(Date.UTC(istYear, quarter * 3, 1, 0, 0, 0, 0));
+    endDate = new Date(Date.UTC(istYear, (quarter + 1) * 3, 0, 23, 59, 59, 999));
+    lastPeriodStart = new Date(Date.UTC(istYear, (quarter - 1) * 3, 1, 0, 0, 0, 0));
+    lastPeriodEnd = new Date(Date.UTC(istYear, quarter * 3, 0, 23, 59, 59, 999));
   } else if (period === 'half-yearly') {
-    const half = now.getMonth() < 6 ? 0 : 6;
-    startDate = new Date(now.getFullYear(), half, 1);
-    endDate = new Date(now.getFullYear(), half + 6, 0);
-    lastPeriodStart = new Date(now.getFullYear(), half - 6, 1);
-    lastPeriodEnd = new Date(now.getFullYear(), half, 0);
+    const half = istMonth < 6 ? 0 : 6;
+    startDate = new Date(Date.UTC(istYear, half, 1, 0, 0, 0, 0));
+    endDate = new Date(Date.UTC(istYear, half + 6, 0, 23, 59, 59, 999));
+    lastPeriodStart = new Date(Date.UTC(istYear, half - 6, 1, 0, 0, 0, 0));
+    lastPeriodEnd = new Date(Date.UTC(istYear, half, 0, 23, 59, 59, 999));
   } else if (period === 'annually' || period === 'yearly') {
-    startDate = new Date(now.getFullYear(), 0, 1);
-    endDate = new Date(now.getFullYear(), 12, 0);
-    lastPeriodStart = new Date(now.getFullYear() - 1, 0, 1);
-    lastPeriodEnd = new Date(now.getFullYear() - 1, 12, 0);
+    startDate = new Date(Date.UTC(istYear, 0, 1, 0, 0, 0, 0));
+    endDate = new Date(Date.UTC(istYear, 12, 0, 23, 59, 59, 999));
+    lastPeriodStart = new Date(Date.UTC(istYear - 1, 0, 1, 0, 0, 0, 0));
+    lastPeriodEnd = new Date(Date.UTC(istYear - 1, 12, 0, 23, 59, 59, 999));
   }
 
   // Get current period's revenue target
@@ -405,9 +410,19 @@ exports.getMonthlyRevenueProgress = catchAsync(async (req, res, next) => {
   
   const todayEarnings = dailyRevenue[0]?.total || 0;
 
-  // Calculate days elapsed/remaining
-  const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
-  const daysElapsed = Math.ceil((now - startDate) / (1000 * 60 * 60 * 24));
+  // Calculate days elapsed/remaining based on exactly what day of the month it currently is in IST
+  // We use dates stripped of hours/minutes so differences are exactly N days
+  const rawStart = new Date(startDate);
+  const startStr = new Date(rawStart.getTime() + (5.5 * 60 * 60 * 1000));
+  const rawEnd = new Date(endDate);
+  const endStr = new Date(rawEnd.getTime() + (5.5 * 60 * 60 * 1000));
+  
+  const startNormalized = new Date(Date.UTC(startStr.getUTCFullYear(), startStr.getUTCMonth(), startStr.getUTCDate()));
+  const endNormalized = new Date(Date.UTC(endStr.getUTCFullYear(), endStr.getUTCMonth(), endStr.getUTCDate()));
+  const nowNormalized = new Date(Date.UTC(nowIST.getUTCFullYear(), nowIST.getUTCMonth(), nowIST.getUTCDate()));
+
+  const totalDays = Math.round((endNormalized - startNormalized) / (1000 * 60 * 60 * 24)) + 1; 
+  const daysElapsed = Math.round((nowNormalized - startNormalized) / (1000 * 60 * 60 * 24)) + 1;
   const daysRemaining = Math.max(0, totalDays - daysElapsed);
 
   const response = {

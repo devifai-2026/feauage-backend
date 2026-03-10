@@ -11,44 +11,61 @@ class APIFeatures {
     const excludedFields = ['page', 'sort', 'limit', 'fields', 'search'];
     excludedFields.forEach(el => delete queryObj[el]);
 
-    // Remove empty strings, null, and undefined values from queryObj
+    // 1) Advanced cleaning and nested object expansion (handles field[op]=val)
+    const expandedQuery = {};
     Object.keys(queryObj).forEach(key => {
-      if (queryObj[key] === '' || queryObj[key] === null || queryObj[key] === undefined) {
-        delete queryObj[key];
-      }
+      const val = queryObj[key];
+      if (val === '' || val === null || val === undefined) return;
 
-      // Also handle date range fields
-      if (key === 'startDate' || key === 'endDate') {
-        delete queryObj[key];
+      // Handle bracketed notation: field[op]=val
+      const match = key.match(/^(.+)\[(.+)\]$/);
+      if (match) {
+        const [, field, op] = match;
+        if (!expandedQuery[field]) expandedQuery[field] = {};
+        
+        // Convert operator (gte -> $gte)
+        const mongoOp = ['gte', 'gt', 'lte', 'lt', 'in', 'ne'].includes(op) ? `$${op}` : op;
+        expandedQuery[field][mongoOp] = val;
+      } else if (typeof val === 'string' && val.startsWith('[') && val.endsWith(']')) {
+        // Handle stringified arrays: field=['a','b']
+        try {
+          const jsonVal = val.replace(/'/g, '"');
+          const parsedArray = JSON.parse(jsonVal);
+          if (Array.isArray(parsedArray) && parsedArray.length > 0) {
+            expandedQuery[key] = { $in: parsedArray };
+          }
+        } catch (e) {
+          expandedQuery[key] = val;
+        }
+      } else {
+        expandedQuery[key] = val;
       }
     });
 
-    // If startDate and endDate are provided separately, create a date range filter
-    if (this.queryString.startDate || this.queryString.endDate) {
-      const dateFilter = {};
+    // 2) Replace standard gte|gt|lte|lt in any remaining nested objects (only if not already prefixed)
+    // This handles both req.query.sellingPrice.gte AND req.query['sellingPrice[gte]']
+    let queryStr = JSON.stringify(expandedQuery);
+    queryStr = queryStr.replace(/\b(?<!\$)(gte|gt|lte|lt|in|ne)\b/g, match => `$${match}`);
+    
+    const parsedQuery = JSON.parse(queryStr);
 
-      if (this.queryString.startDate) {
-        dateFilter.$gte = new Date(this.queryString.startDate);
-      }
+    // 3) Final pass: Convert strings to numbers for comparison operators
+    const finalizeQuery = (obj) => {
+      Object.keys(obj).forEach(key => {
+        const val = obj[key];
+        if (typeof val === 'object' && val !== null) {
+          finalizeQuery(val);
+        } else if (typeof val === 'string' && !isNaN(val) && val.trim() !== '') {
+          // If the key is a comparison operator, convert to number
+          if (['$gte', '$gt', '$lte', '$lt'].includes(key)) {
+            obj[key] = Number(val);
+          }
+        }
+      });
+    };
 
-      if (this.queryString.endDate) {
-        dateFilter.$lte = new Date(this.queryString.endDate);
-      }
-
-      if (Object.keys(dateFilter).length > 0) {
-        queryObj.createdAt = dateFilter;
-      }
-    }
-
-    // Advanced filtering for gte, gt, lte, lt operators
-    let queryStr = JSON.stringify(queryObj);
-    queryStr = queryStr.replace(/\b(gte|gt|lte|lt)\b/g, match => `$${match}`);
-
-    if (queryStr === '{}') {
-      this.filterQuery = {};
-    } else {
-      this.filterQuery = JSON.parse(queryStr);
-    }
+    finalizeQuery(parsedQuery);
+    this.filterQuery = parsedQuery;
 
     console.log("Final filter query:", this.filterQuery);
     this.query = this.query.find(this.filterQuery);
