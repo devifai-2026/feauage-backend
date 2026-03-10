@@ -19,21 +19,16 @@ const shippingService = new ShippingService();
 // @access  Private/Admin
 
 exports.getAllOrders = catchAsync(async (req, res, next) => {
-  console.log("=== getAllOrders Debug ===");
-  console.log("Query parameters:", req.query);
-  
   // Create base query
   let baseQuery = Order.find();
-  
+
   // Apply APIFeatures
   const features = new APIFeatures(baseQuery, req.query)
     .filter()
     .sort()
     .limitFields()
     .paginate();
-  
-  console.log("Final filter query:", features.filterQuery);
-  
+
   // Execute query with population
   const orders = await features.query
     .populate({
@@ -49,21 +44,10 @@ exports.getAllOrders = catchAsync(async (req, res, next) => {
       }
     })
     .populate('addresses');
-  
-  console.log("Found orders:", orders.length);
-  
+
   // Get total count
   const total = await Order.countDocuments(features.filterQuery);
-  console.log("Total count with filter:", total);
-  
-  // Debug: Also check total without any filters
-  const totalAll = await Order.countDocuments({});
-  console.log("Total orders in DB:", totalAll);
-  
-  // Debug: Check if we can find the order directly
-  const testOrder = await Order.findById("694197052cf79abed2bbfeb9");
-  console.log("Test order found:", testOrder ? "Yes" : "No");
-  
+
   res.status(200).json({
     status: 'success',
     results: orders.length,
@@ -152,11 +136,11 @@ exports.updateOrderStatus = catchAsync(async (req, res, next) => {
     });
   }
   
-  // If order is cancelled, return stock for items
+  // If order is cancelled, return stock and cancel Shiprocket shipment
   if (status === 'cancelled' && previousStatus !== 'cancelled') {
     // Return stock for cancelled items
     const orderItems = await OrderItem.find({ order: order._id });
-    
+
     for (const item of orderItems) {
       await Product.updateStock(
         item.product,
@@ -168,8 +152,22 @@ exports.updateOrderStatus = catchAsync(async (req, res, next) => {
         `Order ${order.orderId} cancelled by admin`
       );
     }
+
+    // Cancel Shiprocket shipment if one exists
+    if (order.shiprocketOrderId) {
+      try {
+        await shippingService.cancelShipment(order.shiprocketOrderId);
+        await Order.findByIdAndUpdate(order._id, { shippingStatus: 'cancelled' });
+        console.log(`[Shiprocket] ✅ Shipment cancelled for order ${order.orderId} (admin status update)`);
+      } catch (err) {
+        console.error(`[Shiprocket] ❌ Failed to cancel shipment for order ${order.orderId}:`, err.message);
+        // Don't block the response — order is still marked cancelled in our system
+      }
+    } else {
+      console.log(`[Shiprocket] ℹ️  No Shiprocket shipment to cancel for order ${order.orderId}`);
+    }
   }
-  
+
   res.status(200).json({
     status: 'success',
     data: {
@@ -1290,7 +1288,7 @@ exports.getAvailableCouriers = catchAsync(async (req, res, next) => {
   const weight = req.query.weight || 0.5;
 
   // Pickup pincode (your warehouse/store pincode)
-  const pickupPincode = process.env.PICKUP_PINCODE || '400001';
+  const pickupPincode = process.env.SHIPROCKET_PICKUP_PINCODE || '400001';
 
   try {
     const couriers = await shippingService.getAvailableCouriers(
@@ -1529,8 +1527,8 @@ exports.cancelShipment = catchAsync(async (req, res, next) => {
     return next(new AppError('Order not found', 404));
   }
 
-  if (!order.shiprocketShipmentId) {
-    return next(new AppError('No shipment found for this order', 400));
+  if (!order.shiprocketOrderId) {
+    return next(new AppError('No Shiprocket order found for this order', 400));
   }
 
   // Check if shipment can be cancelled (not delivered)
@@ -1539,7 +1537,7 @@ exports.cancelShipment = catchAsync(async (req, res, next) => {
   }
 
   try {
-    await shippingService.cancelShipment(order.shiprocketShipmentId);
+    await shippingService.cancelShipment(order.shiprocketOrderId);
 
     // Update order
     order.shippingStatus = 'cancelled';
@@ -1554,7 +1552,7 @@ exports.cancelShipment = catchAsync(async (req, res, next) => {
       entityId: order._id,
       metadata: {
         orderId: order.orderId,
-        shiprocketShipmentId: order.shiprocketShipmentId,
+        shiprocketOrderId: order.shiprocketOrderId,
         reason
       },
       ipAddress: req.ip,
@@ -1626,7 +1624,7 @@ exports.getShippingChargesEstimate = catchAsync(async (req, res, next) => {
     return next(new AppError('Shipping address not found', 400));
   }
 
-  const pickupPincode = process.env.PICKUP_PINCODE || '400001';
+  const pickupPincode = process.env.SHIPROCKET_PICKUP_PINCODE || '400001';
 
   try {
     const chargesResponse = await shippingService.getShippingCharges(
@@ -1650,6 +1648,125 @@ exports.getShippingChargesEstimate = catchAsync(async (req, res, next) => {
       500
     ));
   }
+});
+
+// @desc    Retry automated shipment process for an order (clears stuck Shiprocket state)
+// @route   POST /api/v1/admin/orders/:id/retry-shipment
+// @access  Private/Admin
+exports.retryShipment = catchAsync(async (req, res, next) => {
+  const order = await Order.findById(req.params.id);
+
+  if (!order) {
+    return next(new AppError('Order not found', 404));
+  }
+
+  if (order.shiprocketAWB) {
+    return next(new AppError('Order already has AWB assigned. Cancel the shipment first if you want to re-assign.', 400));
+  }
+
+  if (!['pending', 'confirmed', 'processing'].includes(order.status)) {
+    return next(new AppError('Shipment retry is only allowed for pending/confirmed/processing orders', 400));
+  }
+
+  // Reset stuck Shiprocket IDs so processShipmentForOrder creates a fresh order
+  if (order.shiprocketOrderId) {
+    console.log(`[Admin] Resetting stuck Shiprocket state for order ${order.orderId}: orderID=${order.shiprocketOrderId}, shipmentID=${order.shiprocketShipmentId}`);
+    order.shiprocketOrderId = null;
+    order.shiprocketShipmentId = null;
+    await order.save();
+  }
+
+  const result = await shippingService.processShipmentForOrder(order._id);
+
+  await AdminActivity.logActivity({
+    adminUser: req.user.id,
+    action: 'update',
+    entityType: 'Order',
+    entityId: order._id,
+    metadata: {
+      orderId: order.orderId,
+      success: result.success,
+      warning: result.warning,
+      awb: result.order?.shiprocketAWB
+    },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
+
+  if (result.success && !result.warning) {
+    emitOrderNotification('shipping_retry_success', {
+      type: 'shipping_retry_success',
+      orderId: order.orderId,
+      orderDbId: order._id,
+      userId: order.user?.toString(),
+      awb: result.order?.shiprocketAWB,
+      courierName: result.order?.courierName,
+      message: `Shipment retry succeeded for order ${order.orderId}`
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Shipment process completed successfully',
+      data: {
+        order: result.order,
+        courier: result.courier
+      }
+    });
+  }
+
+  // Partial success or no couriers
+  res.status(200).json({
+    status: 'success',
+    message: result.warning || result.error || 'Shipment process completed with issues',
+    warning: result.warning || result.error,
+    data: {
+      order: result.order
+    }
+  });
+});
+
+// @desc    Manually update AWB / tracking details for an order
+// @route   PATCH /api/v1/admin/orders/:id/update-awb
+// @access  Private/Admin
+exports.updateAWB = catchAsync(async (req, res, next) => {
+  const { awb, courierName, trackingUrl } = req.body;
+
+  if (!awb || !awb.trim()) {
+    return next(new AppError('AWB number is required', 400));
+  }
+
+  const order = await Order.findById(req.params.id);
+  if (!order) {
+    return next(new AppError('Order not found', 404));
+  }
+
+  const prevAWB = order.shiprocketAWB;
+
+  order.shiprocketAWB = awb.trim();
+  order.trackingNumber = awb.trim();
+  if (courierName) order.courierName = courierName.trim();
+  order.trackingUrl = trackingUrl?.trim() || `https://shiprocket.co/tracking/${awb.trim()}`;
+  if (!order.shippingStatus || order.shippingStatus === 'pending') {
+    order.shippingStatus = 'confirmed';
+  }
+
+  await order.save();
+
+  await AdminActivity.logActivity({
+    adminUser: req.user.id,
+    action: 'update',
+    entityType: 'Order',
+    entityId: order._id,
+    metadata: { previousAWB: prevAWB, newAWB: awb.trim(), courierName, orderId: order.orderId },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
+
+  res.status(200).json({
+    status: 'success',
+    message: 'AWB updated successfully',
+    data: { order }
+  });
 });
 
 // @desc    Generate manifest for multiple orders

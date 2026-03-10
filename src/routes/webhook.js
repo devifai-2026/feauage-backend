@@ -8,6 +8,6 @@ const router = express.Router();
 
 // Webhook endpoints (no authentication required - called by external services)
 router.post('/razorpay', handleRazorpayWebhook);
-router.post('/shiprocket', handleShiprocketWebhook);
+router.post('/shipping-updates', handleShiprocketWebhook);
 
 module.exports = router;

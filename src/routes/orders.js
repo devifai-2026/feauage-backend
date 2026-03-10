@@ -10,6 +10,7 @@ const {
   initiatePayment,
   getRecentActivity,
   getUserNames,
+  checkServiceability,
 } = require('../controllers/orderController');
 const { protect } = require('../middleware/auth');
 
@@ -27,6 +28,7 @@ router.get('/:id', getOrder);
 router.get('/:id/track', trackOrder);
 router.get('/:id/invoice', getOrderInvoice);
 router.post('/initiate-payment', initiatePayment);
+router.post('/check-serviceability', checkServiceability);
 router.post('/', createOrder);
 router.patch('/:id/cancel', cancelOrder);
 router.post('/:id/create-payment', createPaymentOrder);

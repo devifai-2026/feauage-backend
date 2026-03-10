@@ -31,6 +31,9 @@ const promoRoutes = require('./routes/promo');
 const errorHandler = require('./middleware/errorHandler');
 const AppError = require('./utils/appError');
 
+// Import services for startup checks
+const ShippingService = require('./services/shippingService');
+
 const app = express();
 
 // 1) GLOBAL MIDDLEWARES
@@ -124,6 +127,22 @@ app.use('/api/v1/banners', bannerRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/promo-codes', promoRoutes);
 
+// Run Shiprocket connection test on startup
+const _shippingServiceStartup = new ShippingService();
+_shippingServiceStartup.testConnection().then(ok => {
+  if (!ok) {
+    console.warn('[Shiprocket] ⚠️  Orders will be created but shipments will NOT be auto-processed until credentials are fixed.');
+  }
+}).catch(() => {});
+
+// Log public URL for webhook configuration
+const publicUrl = process.env.NGROK_URL || process.env.SERVER_URL || 'http://localhost:5001';
+console.log('======================================================');
+console.log('🌐 Webhook URLs (configure these in external dashboards):');
+console.log(`   Razorpay webhook:   ${publicUrl}/api/v1/webhooks/razorpay`);
+console.log(`   Shiprocket webhook: ${publicUrl}/api/v1/webhooks/shipping-updates`);
+console.log('======================================================');
+
 // Health check endpoint
 app.get('/api/v1/health', (req, res) => {
   res.status(200).json({
@@ -131,6 +150,18 @@ app.get('/api/v1/health', (req, res) => {
     message: 'Server is healthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
+  });
+});
+
+// Shiprocket health check endpoint (admin use)
+app.get('/api/v1/health/shiprocket', async (req, res) => {
+  const svc = new ShippingService();
+  const ok = await svc.testConnection();
+  res.status(ok ? 200 : 503).json({
+    status: ok ? 'success' : 'error',
+    shiprocket: ok ? 'connected' : 'authentication_failed',
+    email: process.env.SHIPROCKET_EMAIL || 'not set',
+    timestamp: new Date().toISOString()
   });
 });
 
