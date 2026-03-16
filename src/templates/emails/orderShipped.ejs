@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your Order Has Been Shipped</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #f5f5f5;
+      font-family: Arial, sans-serif;
+      color: #333333;
+    }
+    .wrapper {
+      max-width: 600px;
+      margin: 30px auto;
+      background-color: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .header {
+      background: linear-gradient(135deg, #b8860b, #d4a017);
+      padding: 32px 24px;
+      text-align: center;
+    }
+    .header h1 {
+      margin: 0;
+      color: #ffffff;
+      font-size: 26px;
+      letter-spacing: 1px;
+    }
+    .header p {
+      margin: 6px 0 0;
+      color: #fff3cd;
+      font-size: 14px;
+    }
+    .body {
+      padding: 32px 28px;
+    }
+    .greeting {
+      font-size: 16px;
+      margin-bottom: 12px;
+    }
+    .intro {
+      font-size: 15px;
+      color: #555;
+      margin-bottom: 28px;
+      line-height: 1.6;
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: bold;
+      color: #b8860b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+    .details-box {
+      background-color: #fdf8ec;
+      border: 1px solid #e8d5a3;
+      border-radius: 6px;
+      padding: 18px 20px;
+      margin-bottom: 28px;
+    }
+    .details-box table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .details-box td {
+      padding: 7px 0;
+      font-size: 14px;
+      vertical-align: top;
+    }
+    .details-box td:first-child {
+      color: #888;
+      width: 40%;
+      font-weight: bold;
+    }
+    .details-box td:last-child {
+      color: #333;
+    }
+    .track-btn {
+      display: block;
+      width: fit-content;
+      margin: 0 auto 28px;
+      background: linear-gradient(135deg, #b8860b, #d4a017);
+      color: #ffffff !important;
+      text-decoration: none;
+      padding: 14px 36px;
+      border-radius: 50px;
+      font-size: 15px;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+      text-align: center;
+    }
+    .note {
+      background-color: #f9f9f9;
+      border-left: 3px solid #d4a017;
+      padding: 12px 16px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+    .divider {
+      border: none;
+      border-top: 1px solid #eeeeee;
+      margin: 24px 0;
+    }
+    .footer {
+      background-color: #1a1a1a;
+      padding: 24px;
+      text-align: center;
+    }
+    .footer p {
+      margin: 4px 0;
+      font-size: 13px;
+      color: #aaaaaa;
+    }
+    .footer a {
+      color: #d4a017;
+      text-decoration: none;
+    }
+    .footer .brand {
+      color: #ffffff;
+      font-size: 16px;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+
+    <!-- Header -->
+    <div class="header">
+      <h1>🚚 Your Order is on its Way!</h1>
+      <p>Feauag Jewellery — Elegance Delivered to Your Door</p>
+    </div>
+
+    <!-- Body -->
+    <div class="body">
+      <p class="greeting">Dear <strong><%= customerName %></strong>,</p>
+      <p class="intro">
+        Great news! 🎉 Your order from <strong>Feauag</strong> has been successfully shipped
+        and is on its way to you. We're excited for you to receive your beautiful jewellery!
+      </p>
+
+      <!-- Order Details -->
+      <div class="section-title">📦 Order Details</div>
+      <div class="details-box">
+        <table>
+          <tr>
+            <td>Order ID</td>
+            <td><strong><%= orderId %></strong></td>
+          </tr>
+          <tr>
+            <td>Product</td>
+            <td><%= productName %></td>
+          </tr>
+          <tr>
+            <td>Shipping Partner</td>
+            <td><%= courierName %></td>
+          </tr>
+          <tr>
+            <td>Tracking ID</td>
+            <td><strong><%= trackingNumber %></strong></td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Track Button -->
+      <div class="section-title">🔗 Track Your Order</div>
+      <a href="<%= trackingUrl %>" class="track-btn">Track My Order</a>
+
+      <!-- Note -->
+      <div class="note">
+        Our delivery partner will soon bring your beautiful jewellery to your doorstep.
+        Please keep your phone available for delivery updates.
+      </div>
+
+      <hr class="divider" />
+
+      <p style="font-size:14px; color:#555; line-height:1.6;">
+        If you have any questions regarding your order, feel free to contact our support team.
+        We're always happy to help!
+      </p>
+
+      <p style="font-size:15px; color:#333; margin-top:20px;">
+        Thank you for shopping with <strong>Feauag</strong>. We hope you love your jewellery! 💎
+      </p>
+
+      <p style="font-size:14px; color:#555; margin-top:16px;">
+        Warm regards,<br />
+        <strong>Team Feauag</strong>
+      </p>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <p class="brand">Feauag Jewellery</p>
+      <p>🌐 <a href="<%= websiteUrl %>"><%= websiteUrl %></a></p>
+      <p style="margin-top:10px; font-size:11px; color:#666;">
+        You received this email because you placed an order with us.<br/>
+        &copy; <%= new Date().getFullYear() %> Feauag. All rights reserved.
+      </p>
+    </div>
+
+  </div>
+</body>
+</html>

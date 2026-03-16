@@ -63,7 +63,6 @@ const {
   // Shiprocket integration
   createShipment,
   getAvailableCouriers,
-  generateAWB,
   schedulePickup,
   trackShipment,
   cancelShipment,
@@ -71,7 +70,6 @@ const {
   getShippingChargesEstimate,
   generateManifest,
   retryShipment,
-  updateAWB,
 } = require("../controllers/admin/orderController");
 
 const {
@@ -219,12 +217,10 @@ router.patch("/orders/:id/payment-status", updatePaymentStatus);
 // Shiprocket integration routes
 router.post("/orders/:id/create-shipment", createShipment);
 router.get("/orders/:id/available-couriers", getAvailableCouriers);
-router.post("/orders/:id/generate-awb", generateAWB);
 router.post("/orders/:id/schedule-pickup", schedulePickup);
 router.get("/orders/:id/track-shipment", trackShipment);
 router.post("/orders/:id/cancel-shipment", cancelShipment);
 router.post("/orders/:id/retry-shipment", retryShipment);
-router.patch("/orders/:id/update-awb", updateAWB);
 router.get("/orders/:id/shipping-label", printShippingLabel);
 router.post("/orders/:id/shipping-charges", getShippingChargesEstimate);
 router.post("/orders/generate-manifest", generateManifest);
