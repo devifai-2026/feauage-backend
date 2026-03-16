@@ -1,15 +1,16 @@
-const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
+const nodemailer = require('nodemailer');
 const ejs = require('ejs');
 const fs = require('fs');
 const path = require('path');
 
-// Configure AWS SES (v3)
-const ses = new SESClient({
-  region: process.env.AWS_SES_REGION || 'ap-south-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-  }
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || '587', 10),
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
 });
 
 class Email {
@@ -17,77 +18,52 @@ class Email {
     this.to = user.email;
     this.firstName = user.firstName;
     this.url = url;
-    this.from = process.env.AWS_SES_SENDER_EMAIL || 'noreply@jewellery.com';
+    this.from = `"Feauag" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`;
   }
 
-  // Send actual email
   async send(template, subject, data = {}) {
     try {
-      // Read email template
       const templatePath = path.join(__dirname, '../templates/emails', `${template}.ejs`);
       const templateContent = fs.readFileSync(templatePath, 'utf-8');
 
-      // Render template with data
       const html = ejs.render(templateContent, {
         firstName: this.firstName,
         url: this.url,
         ...data
       });
 
-      // Define email params
-      const params = {
-        Source: this.from,
-        Destination: {
-          ToAddresses: [this.to]
-        },
-        Message: {
-          Body: {
-            Html: {
-              Charset: 'UTF-8',
-              Data: html
-            },
-            Text: {
-              Charset: 'UTF-8',
-              Data: `Hello ${this.firstName}, Please visit ${this.url} to complete the action.`
-            }
-          },
-          Subject: {
-            Charset: 'UTF-8',
-            Data: subject
-          }
-        }
-      };
+      const info = await transporter.sendMail({
+        from: this.from,
+        to: this.to,
+        subject,
+        html,
+        text: `Hello ${this.firstName}, Please visit ${this.url} to complete the action.`,
+      });
 
-      // Send email via SES
-      const response = await ses.send(new SendEmailCommand(params));
-      console.log('Email sent successfully:', response.MessageId);
-
-      return response;
+      console.log(`[EmailService] Sent "${subject}" to ${this.to} — MessageId: ${info.messageId}`);
+      return info;
     } catch (error) {
-      console.error('Error sending email:', error);
+      console.error(`[EmailService] Failed to send "${subject}" to ${this.to}:`, error.message);
       throw error;
     }
   }
 
-  // Send welcome email
   async sendWelcome() {
     await this.send(
       'welcome',
-      'Welcome to Jewellery E-commerce! Please verify your email',
+      'Welcome to Feauag! Please verify your email',
       { type: 'verification' }
     );
   }
 
-  // Send welcome email after verification
   async sendWelcomeVerified() {
     await this.send(
       'welcome',
-      'Welcome to Jewellery E-commerce!',
+      'Welcome to Feauag!',
       { type: 'verified' }
     );
   }
 
-  // Send password reset email
   async sendPasswordReset() {
     await this.send(
       'passwordReset',
@@ -96,7 +72,6 @@ class Email {
     );
   }
 
-  // Send verification email
   async sendVerification() {
     await this.send(
       'verification',
@@ -105,7 +80,6 @@ class Email {
     );
   }
 
-  // Send order confirmation email
   async sendOrderConfirmation(order, orderItems) {
     await this.send(
       'orderConfirmation',
@@ -119,7 +93,6 @@ class Email {
     );
   }
 
-  // Send order shipped email
   async sendOrderShipped(order, trackingNumber) {
     await this.send(
       'orderShipped',
@@ -135,7 +108,6 @@ class Email {
     );
   }
 
-  // Send order delivered email
   async sendOrderDelivered(order) {
     await this.send(
       'orderDelivered',
@@ -148,7 +120,6 @@ class Email {
     );
   }
 
-  // Send payment confirmation email
   async sendPaymentConfirmation(order) {
     await this.send(
       'paymentConfirmation',
@@ -161,39 +132,23 @@ class Email {
     );
   }
 
-  // Send low stock alert email (to admin)
   async sendLowStockAlert(product, adminEmails) {
-    const params = {
-      Source: this.from,
-      Destination: {
-        ToAddresses: adminEmails
-      },
-      Message: {
-        Body: {
-          Html: {
-            Charset: 'UTF-8',
-            Data: `
-              <h2>Low Stock Alert</h2>
-              <p>Product: ${product.name}</p>
-              <p>SKU: ${product.sku}</p>
-              <p>Current Stock: ${product.stockQuantity}</p>
-              <p>Threshold: ${product.lowStockThreshold}</p>
-              <p>Please restock this product as soon as possible.</p>
-            `
-          },
-          Text: {
-            Charset: 'UTF-8',
-            Data: `Low Stock Alert: ${product.name} (SKU: ${product.sku}) has only ${product.stockQuantity} units left.`
-          }
-        },
-        Subject: {
-          Charset: 'UTF-8',
-          Data: `Low Stock Alert: ${product.name}`
-        }
-      }
-    };
+    const html = `
+      <h2>Low Stock Alert</h2>
+      <p>Product: ${product.name}</p>
+      <p>SKU: ${product.sku}</p>
+      <p>Current Stock: ${product.stockQuantity}</p>
+      <p>Threshold: ${product.lowStockThreshold}</p>
+      <p>Please restock this product as soon as possible.</p>
+    `;
 
-    await ses.send(new SendEmailCommand(params));
+    await transporter.sendMail({
+      from: this.from,
+      to: adminEmails,
+      subject: `Low Stock Alert: ${product.name}`,
+      html,
+      text: `Low Stock Alert: ${product.name} (SKU: ${product.sku}) has only ${product.stockQuantity} units left.`,
+    });
   }
 }
 

@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { sendOrderShippedEmail } = require('./mailer');
 
 class ShippingService {
   constructor() {
@@ -592,6 +593,17 @@ class ShippingService {
         });
       } catch (socketErr) {
         console.warn('[ShippingService] Could not emit shipping_confirmed socket event:', socketErr.message);
+      }
+
+      // Send shipped email to customer
+      try {
+        const User = require('../models/User');
+        const user = await User.findById(order.user).select('email firstName');
+        if (user && user.email) {
+          await sendOrderShippedEmail(user, order, orderItems);
+        }
+      } catch (emailErr) {
+        console.warn('[ShippingService] Could not send shipped email:', emailErr.message);
       }
 
       // Attempt to schedule pickup (Optional - user might want to do this manually)

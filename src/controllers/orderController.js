@@ -18,6 +18,7 @@ const AppError = require('../utils/appError');
 const APIFeatures = require('../utils/apiFeatures');
 const razorpay = require('../configs/razorpay');
 const { TAX_RATES, SHIPPING } = require('../constants');
+const Email = require('../services/emailService');
 
 // Initialize shipping service for tracking
 const shippingService = new ShippingService();
@@ -485,6 +486,21 @@ exports.createOrder = catchAsync(async (req, res, next) => {
 
   // Emit and persist new order notification
   notifyNewOrder(order._id);
+
+  // Send order confirmation email to customer
+  try {
+    console.log(`[Mailer] ── Order Confirmation ─────────────────────`);
+    console.log(`[Mailer]   To       : ${req.user.email}`);
+    console.log(`[Mailer]   Customer : ${req.user.firstName || 'N/A'}`);
+    console.log(`[Mailer]   Order ID : ${order.orderId}`);
+    console.log(`[Mailer]   Items    : ${orderItems.length}`);
+    await new Email(req.user).sendOrderConfirmation(order, orderItems);
+    console.log(`[Mailer]   SUCCESS — confirmation email sent`);
+    console.log(`[Mailer] ────────────────────────────────────────────`);
+  } catch (emailErr) {
+    console.error(`[Mailer]   FAILED — ${emailErr.message}`);
+    console.log(`[Mailer] ────────────────────────────────────────────`);
+  }
 
   // Create Razorpay order for online payments if not already paid
   let razorpayOrder = null;

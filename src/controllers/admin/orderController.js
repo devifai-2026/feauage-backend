@@ -1313,72 +1313,6 @@ exports.getAvailableCouriers = catchAsync(async (req, res, next) => {
   }
 });
 
-// @desc    Generate AWB for shipment
-// @route   POST /api/v1/admin/orders/:id/generate-awb
-// @access  Private/Admin
-exports.generateAWB = catchAsync(async (req, res, next) => {
-  const { courierId } = req.body;
-
-  const order = await Order.findById(req.params.id);
-
-  if (!order) {
-    return next(new AppError('Order not found', 404));
-  }
-
-  if (!order.shiprocketShipmentId) {
-    return next(new AppError('Shipment not created yet. Create shipment first.', 400));
-  }
-
-  if (order.shiprocketAWB) {
-    return next(new AppError('AWB already generated for this order', 400));
-  }
-
-  if (!courierId) {
-    return next(new AppError('Courier ID is required', 400));
-  }
-
-  try {
-    const awbResponse = await shippingService.generateAWB(order.shiprocketShipmentId, courierId);
-
-    // Update order with AWB details
-    order.shiprocketAWB = awbResponse.response?.data?.awb_code;
-    order.trackingNumber = awbResponse.response?.data?.awb_code;
-    order.courierName = awbResponse.response?.data?.courier_name;
-    order.shippingStatus = 'processing';
-    await order.save();
-
-    // Log admin activity
-    await AdminActivity.logActivity({
-      adminUser: req.user.id,
-      action: 'generate_awb',
-      entityType: 'Order',
-      entityId: order._id,
-      metadata: {
-        orderId: order.orderId,
-        awb: awbResponse.response?.data?.awb_code,
-        courier: awbResponse.response?.data?.courier_name
-      },
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent')
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: 'AWB generated successfully',
-      data: {
-        awb: awbResponse.response?.data?.awb_code,
-        courierName: awbResponse.response?.data?.courier_name,
-        order
-      }
-    });
-  } catch (error) {
-    console.error('Shiprocket AWB error:', error.response?.data || error.message);
-    return next(new AppError(
-      error.response?.data?.message || 'Failed to generate AWB',
-      500
-    ));
-  }
-});
 
 // @desc    Schedule pickup for shipment
 // @route   POST /api/v1/admin/orders/:id/schedule-pickup
@@ -1725,49 +1659,6 @@ exports.retryShipment = catchAsync(async (req, res, next) => {
   });
 });
 
-// @desc    Manually update AWB / tracking details for an order
-// @route   PATCH /api/v1/admin/orders/:id/update-awb
-// @access  Private/Admin
-exports.updateAWB = catchAsync(async (req, res, next) => {
-  const { awb, courierName, trackingUrl } = req.body;
-
-  if (!awb || !awb.trim()) {
-    return next(new AppError('AWB number is required', 400));
-  }
-
-  const order = await Order.findById(req.params.id);
-  if (!order) {
-    return next(new AppError('Order not found', 404));
-  }
-
-  const prevAWB = order.shiprocketAWB;
-
-  order.shiprocketAWB = awb.trim();
-  order.trackingNumber = awb.trim();
-  if (courierName) order.courierName = courierName.trim();
-  order.trackingUrl = trackingUrl?.trim() || `https://shiprocket.co/tracking/${awb.trim()}`;
-  if (!order.shippingStatus || order.shippingStatus === 'pending') {
-    order.shippingStatus = 'confirmed';
-  }
-
-  await order.save();
-
-  await AdminActivity.logActivity({
-    adminUser: req.user.id,
-    action: 'update',
-    entityType: 'Order',
-    entityId: order._id,
-    metadata: { previousAWB: prevAWB, newAWB: awb.trim(), courierName, orderId: order.orderId },
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent')
-  });
-
-  res.status(200).json({
-    status: 'success',
-    message: 'AWB updated successfully',
-    data: { order }
-  });
-});
 
 // @desc    Generate manifest for multiple orders
 // @route   POST /api/v1/admin/orders/generate-manifest
