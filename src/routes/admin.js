@@ -134,6 +134,43 @@ const {
   getActivePromoCodes,
 } = require("../controllers/admin/promoCodeController");
 
+const {
+  getSettings,
+  updateSettings,
+} = require("../controllers/admin/settingsController");
+
+const {
+  getAllUpdates,
+  getUpdate,
+  createUpdate,
+  updateUpdate,
+  deleteUpdate,
+} = require("../controllers/admin/updateController");
+
+const {
+  getAllFlashSales,
+  getFlashSale,
+  createFlashSale,
+  updateFlashSale,
+  deleteFlashSale,
+} = require("../controllers/admin/flashSaleController");
+
+const {
+  getConfig: getBestSellerConfig,
+  updateConfig: updateBestSellerConfig,
+} = require("../controllers/admin/bestSellerController");
+
+const {
+  getConfig: getFeaturedConfig,
+  updateConfig: updateFeaturedConfig,
+} = require("../controllers/admin/featuredController");
+
+const {
+  getAllTickets,
+  getTicket,
+  updateTicket,
+} = require("../controllers/admin/supportController");
+
 const { protect, restrictTo, isAdmin } = require("../middleware/auth");
 const {
   uploadProductImages: uploadProductImagesMiddleware,
@@ -294,5 +331,40 @@ router.post("/promo-codes", createPromoCode);
 router.patch("/promo-codes/:id", updatePromoCode);
 router.delete("/promo-codes/:id", deletePromoCode);
 router.get("/public/promo-codes", getActivePromoCodes); // Public exposed via admin router but actually used by client if needed, or I'll move it.
+
+// Settings routes
+router.get("/settings", getSettings);
+router.patch("/settings", updateSettings);
+
+// Flash Sale routes
+router.get("/flash-sales", getAllFlashSales);
+router.post("/flash-sales", createFlashSale);
+router
+  .route("/flash-sales/:id")
+  .get(getFlashSale)
+  .patch(updateFlashSale)
+  .delete(deleteFlashSale);
+
+// Best Seller Section routes
+router.get("/best-sellers-config", getBestSellerConfig);
+router.patch("/best-sellers-config", updateBestSellerConfig);
+
+// Featured Section routes
+router.get("/featured-config", getFeaturedConfig);
+router.patch("/featured-config", updateFeaturedConfig);
+
+// Support Ticket routes
+router.get("/support-tickets", getAllTickets);
+router.get("/support-tickets/:id", getTicket);
+router.patch("/support-tickets/:id", updateTicket);
+
+// Update (Latest Updates / Articles) routes
+router.get("/updates", getAllUpdates);
+router.post("/updates", createUpdate);
+router
+  .route("/updates/:id")
+  .get(getUpdate)
+  .patch(updateUpdate)
+  .delete(deleteUpdate);
 
 module.exports = router;

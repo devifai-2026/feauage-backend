@@ -1,4 +1,5 @@
 const { TAX_RATES, SHIPPING } = require('../constants');
+const Settings = require('../models/Settings');
 
 /**
  * Pricing Service
@@ -6,35 +7,41 @@ const { TAX_RATES, SHIPPING } = require('../constants');
  */
 class PricingService {
     /**
-     * Calculate tax for given amount
+     * Calculate tax for given amount using dynamic settings
      * @param {Number} amount - Taxable amount
-     * @param {Number} rate - Tax rate (default: GST)
-     * @returns {Number} Tax amount
+     * @param {Number} rate - Tax rate (optional override)
+     * @returns {Promise<Number>} Tax amount
      */
-    static calculateTax(amount, rate = TAX_RATES.GST) {
-        return amount * rate;
+    static async calculateTax(amount, rate) {
+        if (rate !== undefined) {
+            return amount * rate;
+        }
+        const settings = await Settings.getSettings();
+        return amount * settings.gstRate;
     }
 
     /**
-     * Calculate shipping charge based on pincode and order value
+     * Calculate shipping charge based on pincode and order value using dynamic settings
      * @param {String} pincode - Delivery pincode
      * @param {Number} orderValue - Total order value
-     * @returns {Number} Shipping charge
+     * @returns {Promise<Number>} Shipping charge
      */
-    static calculateShipping(pincode, orderValue) {
+    static async calculateShipping(pincode, orderValue) {
+        const settings = await Settings.getSettings();
+
         // Free shipping above threshold
-        if (orderValue >= SHIPPING.FREE_THRESHOLD) {
+        if (orderValue >= settings.freeShippingThreshold) {
             return 0;
         }
 
         // Metro cities get lower shipping charge
         const pincodePrefix = pincode.substring(0, 6);
-        if (SHIPPING.METRO_PINCODES.includes(pincodePrefix)) {
-            return SHIPPING.METRO_CHARGE;
+        if (settings.metroPincodes.includes(pincodePrefix)) {
+            return settings.metroShippingCharge;
         }
 
         // Standard charge for other areas
-        return SHIPPING.STANDARD_CHARGE;
+        return settings.standardShippingCharge;
     }
 
     /**
@@ -67,10 +74,10 @@ class PricingService {
      * @param {String} pincode - Delivery pincode
      * @returns {Object} Order totals breakdown
      */
-    static calculateOrderTotals(subtotal, discount, pincode) {
-        const shippingCharge = this.calculateShipping(pincode, subtotal);
+    static async calculateOrderTotals(subtotal, discount, pincode) {
+        const shippingCharge = await this.calculateShipping(pincode, subtotal);
         const taxableAmount = subtotal - discount;
-        const tax = this.calculateTax(taxableAmount);
+        const tax = await this.calculateTax(taxableAmount);
         const grandTotal = subtotal - discount + shippingCharge + tax;
 
         return {

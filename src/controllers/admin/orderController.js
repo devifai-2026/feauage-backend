@@ -10,6 +10,7 @@ const catchAsync = require('../../utils/catchAsync');
 const AppError = require('../../utils/appError');
 const APIFeatures = require('../../utils/apiFeatures');
 const PDFDocument = require('pdfkit');
+const Settings = require('../../models/Settings');
 
 // Initialize shipping service
 const shippingService = new ShippingService();
@@ -421,11 +422,12 @@ exports.createManualOrder = catchAsync(async (req, res, next) => {
     });
   }
   
-  // Calculate shipping charge
-  const shippingCharge = calculateShippingCharge(shippingAddress.pincode, subtotal);
-  
-  // Calculate tax (18% GST)
-  const tax = subtotal * 0.18;
+  // Calculate shipping charge and tax from dynamic settings
+  const settings = await Settings.getSettings();
+  const shippingCharge = calculateShippingCharge(shippingAddress.pincode, subtotal, settings);
+
+  // Calculate tax using dynamic GST rate
+  const tax = subtotal * settings.gstRate;
   
   // Calculate grand total
   const grandTotal = subtotal + shippingCharge + tax;
@@ -1167,17 +1169,21 @@ exports.getOrdersByStatusCount = catchAsync(async (req, res, next) => {
 });
 
 // Helper function
-function calculateShippingCharge(pincode, orderValue) {
-  if (orderValue >= 5000) {
+function calculateShippingCharge(pincode, orderValue, settings) {
+  const freeThreshold = settings ? settings.freeShippingThreshold : 5000;
+  const metroCharge = settings ? settings.metroShippingCharge : 50;
+  const standardCharge = settings ? settings.standardShippingCharge : 100;
+  const metroPincodes = settings ? settings.metroPincodes : ['400001', '110001', '600001', '700001', '500001', '560001'];
+
+  if (orderValue >= freeThreshold) {
     return 0;
   }
 
-  const metroPincodes = ['400001', '110001', '600001', '700001', '500001', '560001'];
   if (metroPincodes.includes(pincode.substring(0, 6))) {
-    return 50;
+    return metroCharge;
   }
 
-  return 100;
+  return standardCharge;
 }
 
 // =====================================================

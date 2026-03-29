@@ -4,7 +4,7 @@ const AppError = require('../../utils/appError');
 
 // @desc    Get all promo codes (Admin)
 exports.getAllPromoCodes = catchAsync(async (req, res, next) => {
-  const promoCodes = await PromoCode.find().sort('-createdAt');
+  const promoCodes = await PromoCode.find().populate('applicableCategory', 'name').sort('-createdAt');
   
   res.status(200).json({
     status: 'success',
@@ -17,7 +17,9 @@ exports.getAllPromoCodes = catchAsync(async (req, res, next) => {
 
 // @desc    Get active promo codes (Client)
 exports.getActivePromoCodes = catchAsync(async (req, res, next) => {
-  const promoCodes = await PromoCode.find({ isActive: true, isSecret: { $ne: true } }).select('code discountPercentage');
+  const promoCodes = await PromoCode.find({ isActive: true, isSecret: { $ne: true } })
+    .populate('applicableCategory', 'name')
+    .select('code discountPercentage applicableCategory minimumPurchase firstTimeOnly');
   
   res.status(200).json({
     status: 'success',
@@ -90,18 +92,29 @@ exports.validatePromoCode = catchAsync(async (req, res, next) => {
     return next(new AppError('Promo code is required', 400));
   }
   
-  const promoCode = await PromoCode.findOne({ code: code.toUpperCase(), isActive: true });
-  
+  const promoCode = await PromoCode.findOne({ code: code.toUpperCase(), isActive: true })
+    .populate('applicableCategory', 'name');
+
   if (!promoCode) {
     return next(new AppError('Invalid or inactive promo code', 400));
   }
-  
+
+  // Check max uses
+  if (promoCode.maxUses > 0 && promoCode.usedCount >= promoCode.maxUses) {
+    return next(new AppError('This promo code has reached its maximum usage limit', 400));
+  }
+
   res.status(200).json({
     status: 'success',
     data: {
       promoCode: {
         code: promoCode.code,
-        discountPercentage: promoCode.discountPercentage
+        discountPercentage: promoCode.discountPercentage,
+        applicableCategory: promoCode.applicableCategory,
+        minimumPurchase: promoCode.minimumPurchase,
+        firstTimeOnly: promoCode.firstTimeOnly,
+        maxUses: promoCode.maxUses,
+        usedCount: promoCode.usedCount
       }
     }
   });

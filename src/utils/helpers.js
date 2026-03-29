@@ -119,9 +119,9 @@ exports.generateInvoiceNumber = () => {
   return `INV${year}${month}${day}${random}`;
 };
 
-// Calculate tax (18% GST)
+// Calculate tax (3% GST for Jewelry)
 exports.calculateTax = (amount) => {
-  return amount * 0.18;
+  return amount * 0.03;
 };
 
 // Format file size

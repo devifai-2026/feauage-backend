@@ -13,9 +13,9 @@ class ShippingService {
     const email = (process.env.SHIPROCKET_EMAIL || '').trim();
     const password = (process.env.SHIPROCKET_PASSWORD || '').trim();
 
-    if (!email || !password) {
-      console.error('[Shiprocket] ❌ Missing credentials — SHIPROCKET_EMAIL or SHIPROCKET_PASSWORD not set in .env');
-      throw new Error('Shiprocket credentials not configured');
+    if (!email || !password || email === 'your_shiprocket_email' || password === 'your_shiprocket_password') {
+      console.error('[Shiprocket] ❌ Missing or placeholder credentials — set real SHIPROCKET_EMAIL and SHIPROCKET_PASSWORD in .env');
+      throw new Error('Shiprocket credentials not configured. Please set real SHIPROCKET_EMAIL and SHIPROCKET_PASSWORD in your .env file.');
     }
 
     try {
@@ -613,11 +613,12 @@ class ShippingService {
       return { success: true, order, courier: selectedCourier };
 
     } catch (error) {
-      console.error('Error in processShipmentForOrder:', error.message);
-      // Don't throw logic errors that would break the checkout flow, just log them.
-      // But if it's a critical error (DB connection), maybe throw.
-      // For now, return error object so caller knows automation failed.
-      return { success: false, error: error.message };
+      const shiprocketError = error.response?.data;
+      const errorDetail = shiprocketError
+        ? JSON.stringify(shiprocketError)
+        : error.message;
+      console.error('Error in processShipmentForOrder:', errorDetail);
+      return { success: false, error: errorDetail };
     }
   }
 }

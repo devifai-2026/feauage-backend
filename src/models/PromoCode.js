@@ -30,6 +30,27 @@ const promoCodeSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Banner',
     sparse: true // Allow null for manually created codes, but index non-null values
+  },
+  applicableCategory: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category',
+    default: null
+  },
+  minimumPurchase: {
+    type: Number,
+    default: 0
+  },
+  firstTimeOnly: {
+    type: Boolean,
+    default: false
+  },
+  maxUses: {
+    type: Number,
+    default: 0
+  },
+  usedCount: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true

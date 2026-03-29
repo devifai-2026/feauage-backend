@@ -18,6 +18,7 @@ const AppError = require('../utils/appError');
 const APIFeatures = require('../utils/apiFeatures');
 const razorpay = require('../configs/razorpay');
 const { TAX_RATES, SHIPPING } = require('../constants');
+const Settings = require('../models/Settings');
 const Email = require('../services/emailService');
 
 // Initialize shipping service for tracking
@@ -78,12 +79,43 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
 
   if (promoCode) {
     const promo = await PromoCode.findOne({ code: promoCode.toUpperCase(), isActive: true });
-    if (promo) discountAmount = Math.max(discountAmount, (cart.cartTotal * promo.discountPercentage) / 100);
+    if (promo) {
+      // Check minimum purchase
+      if (promo.minimumPurchase > 0 && cart.cartTotal < promo.minimumPurchase) {
+        return next(new AppError(`Minimum purchase of ₹${promo.minimumPurchase} is required to use this promo code`, 400));
+      }
+
+      // Check category restriction
+      if (promo.applicableCategory) {
+        const hasMatchingCategory = cart.items.some(item =>
+          item.product?.category?.toString() === promo.applicableCategory.toString()
+        );
+        if (!hasMatchingCategory) {
+          return next(new AppError('This promo code is not applicable to the items in your cart', 400));
+        }
+      }
+
+      // Check first time user
+      if (promo.firstTimeOnly) {
+        const orderCount = await Order.countDocuments({ user: req.user.id, paymentStatus: 'paid' });
+        if (orderCount > 0) {
+          return next(new AppError('This promo code is only available for first-time orders', 400));
+        }
+      }
+
+      // Check max uses
+      if (promo.maxUses > 0 && promo.usedCount >= promo.maxUses) {
+        return next(new AppError('This promo code has reached its maximum usage limit', 400));
+      }
+
+      discountAmount = Math.max(discountAmount, (cart.cartTotal * promo.discountPercentage) / 100);
+    }
   }
 
-  const shippingCharge = calculateShippingCharge(shippingAddress.pincode, cart.cartTotal);
+  const settings = await Settings.getSettings();
+  const shippingCharge = calculateShippingCharge(shippingAddress.pincode, cart.cartTotal, settings);
   const taxableAmount = cart.cartTotal - discountAmount;
-  const tax = taxableAmount * TAX_RATES.GST;
+  const tax = taxableAmount * settings.gstRate;
   const grandTotal = cart.cartTotal - discountAmount + shippingCharge + tax;
 
   // Stock check
@@ -240,17 +272,53 @@ exports.createOrder = catchAsync(async (req, res, next) => {
   if (promoCode) {
     const promo = await PromoCode.findOne({ code: promoCode.toUpperCase(), isActive: true });
     if (promo) {
-      discountAmount = (cart.cartTotal * promo.discountPercentage) / 100;
-      appliedPromoCodeStr = promo.code;
+      let promoValid = true;
+
+      // Check minimum purchase
+      if (promo.minimumPurchase > 0 && cart.cartTotal < promo.minimumPurchase) {
+        promoValid = false;
+      }
+
+      // Check category restriction
+      if (promoValid && promo.applicableCategory) {
+        const hasMatchingCategory = cart.items.some(item =>
+          item.product?.category?.toString() === promo.applicableCategory.toString()
+        );
+        if (!hasMatchingCategory) {
+          promoValid = false;
+        }
+      }
+
+      // Check first time user
+      if (promoValid && promo.firstTimeOnly) {
+        const orderCount = await Order.countDocuments({ user: req.user.id, paymentStatus: 'paid' });
+        if (orderCount > 0) {
+          promoValid = false;
+        }
+      }
+
+      // Check max uses
+      if (promoValid && promo.maxUses > 0 && promo.usedCount >= promo.maxUses) {
+        promoValid = false;
+      }
+
+      // If all checks pass, apply discount and increment usedCount
+      if (promoValid) {
+        discountAmount = (cart.cartTotal * promo.discountPercentage) / 100;
+        appliedPromoCodeStr = promo.code;
+        promo.usedCount += 1;
+        await promo.save();
+      }
     }
   }
 
   // Calculate shipping charge (simplified - you might want to integrate with shipping API)
-  const shippingCharge = calculateShippingCharge(shippingAddress.pincode, cart.cartTotal);
+  const settings = await Settings.getSettings();
+  const shippingCharge = calculateShippingCharge(shippingAddress.pincode, cart.cartTotal, settings);
 
-  // Calculate tax (18% GST for India)
+  // Calculate tax
   const taxableAmount = cart.cartTotal - discountAmount;
-  const tax = taxableAmount * TAX_RATES.GST;
+  const tax = taxableAmount * settings.gstRate;
 
   // Calculate grand total
   const grandTotal = cart.cartTotal - discountAmount + shippingCharge + tax;
@@ -527,7 +595,12 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     }
   }
 
-  // Shipment creation is handled by the Razorpay webhook (payment.captured event)
+  // Trigger Shiprocket shipment creation immediately if payment is confirmed
+  if (isPaid && !order.shiprocketOrderId) {
+    shippingService.processShipmentForOrder(order._id).catch(err => {
+      console.error(`[createOrder] Shiprocket auto-shipment failed for ${order.orderId}:`, err.message);
+    });
+  }
 
   // Populate order for response
   const populatedOrder = await Order.findById(order._id)
@@ -1103,23 +1176,27 @@ exports.getUserNames = catchAsync(async (req, res, next) => {
 });
 
 // Helper function to calculate shipping charge
-function calculateShippingCharge(pincode, orderValue) {
+function calculateShippingCharge(pincode, orderValue, settings) {
   // Simplified shipping calculation
   // In production, integrate with Shiprocket or similar service
-  if (orderValue >= 5000) {
-    return 0; // Free shipping above ₹5000
+  const freeThreshold = settings ? settings.freeShippingThreshold : 5000;
+  const metroCharge = settings ? settings.metroShippingCharge : 50;
+  const standardCharge = settings ? settings.standardShippingCharge : 100;
+  const metroPincodes = settings ? settings.metroPincodes : ['400001', '110001', '600001', '700001', '500001', '560001'];
+
+  if (orderValue >= freeThreshold) {
+    return 0;
   }
 
   // Handle missing pincode
   if (!pincode || typeof pincode !== 'string') {
-    return 100; // Default standard charge
+    return standardCharge;
   }
 
-  // Sample pincode-based calculation
-  const metroPincodes = ['400001', '110001', '600001', '700001', '500001', '560001'];
+  // Pincode-based calculation
   if (metroPincodes.includes(pincode.substring(0, 6))) {
-    return 50; // ₹50 for metro cities
+    return metroCharge;
   }
 
-  return 100; // ₹100 for other cities
+  return standardCharge;
 }

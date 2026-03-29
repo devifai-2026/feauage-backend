@@ -11,9 +11,9 @@ const APIFeatures = require('../utils/apiFeatures');
 // @route   GET /api/v1/products
 // @access  Public
 exports.getAllProducts = catchAsync(async (req, res, next) => {
-  // Build query
+  // Build query — only show active products on public API
   const features = new APIFeatures(
-    Product.find(),
+    Product.find({ isActive: true }),
     req.query
   )
     .filter()
@@ -30,8 +30,8 @@ exports.getAllProducts = catchAsync(async (req, res, next) => {
     .populate('images')
     .populate('gemstones');
   
-  // Get total count
-  const total = await Product.countDocuments(features.filterQuery);
+  // Get total count (include isActive filter)
+  const total = await Product.countDocuments({ ...features.filterQuery, isActive: true });
   
   res.status(200).json({
     status: 'success',

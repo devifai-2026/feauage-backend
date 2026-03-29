@@ -149,6 +149,13 @@ exports.handlePaymentCallback = catchAsync(async (req, res, next) => {
         userName: user?.fullName || 'Customer'
       });
 
+      // Trigger Shiprocket shipment immediately after payment callback
+      if (!order.shiprocketOrderId) {
+        shippingService.processShipmentForOrder(order._id).catch(err => {
+          console.error(`[paymentCallback] Shiprocket auto-shipment failed for ${order.orderId}:`, err.message);
+        });
+      }
+
       // Redirect to success page
       return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/payment-status?status=success&orderId=${order.orderId}`);
     }
@@ -235,7 +242,12 @@ exports.verifyPayment = catchAsync(async (req, res, next) => {
     userName: user.fullName
   });
 
-  // Shipment creation is handled by the Razorpay webhook (payment.captured event)
+  // Trigger Shiprocket shipment immediately after payment is verified
+  if (!order.shiprocketOrderId) {
+    shippingService.processShipmentForOrder(order._id).catch(err => {
+      console.error(`[verifyPayment] Shiprocket auto-shipment failed for ${order.orderId}:`, err.message);
+    });
+  }
 
   res.status(200).json({
     status: 'success',
