@@ -248,9 +248,15 @@ exports.deleteProduct = catchAsync(async (req, res, next) => {
     }
   }
 
-  // Soft delete - set isActive to false
-  product.isActive = false;
-  await product.save();
+  // Hard delete
+  await Product.findByIdAndDelete(req.params.id);
+
+  // Clean up associated data
+  await Promise.all([
+    ProductImage.deleteMany({ product: req.params.id }),
+    ProductGemstone.deleteMany({ product: req.params.id }),
+    StockHistory.deleteMany({ product: req.params.id })
+  ]);
 
   // Log admin activity
   await AdminActivity.logActivity({

@@ -201,15 +201,11 @@ exports.updateProduct = catchAsync(async (req, res, next) => {
 // @route   DELETE /api/v1/products/:id
 // @access  Private/Admin
 exports.deleteProduct = catchAsync(async (req, res, next) => {
-  const product = await Product.findById(req.params.id);
+  const product = await Product.findByIdAndDelete(req.params.id);
   
   if (!product) {
     return next(new AppError('Product not found', 404));
   }
-  
-  // Soft delete - set isActive to false
-  product.isActive = false;
-  await product.save();
   
   res.status(204).json({
     status: 'success',
