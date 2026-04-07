@@ -143,3 +143,24 @@ exports.updateContactSupport = catchAsync(async (req, res, next) => {
     }
   });
 });
+
+// @desc    Mark all contact support tickets as read
+// @route   PATCH /api/v1/contact/markAllAsRead
+// @access  Private/Admin
+exports.markAllAsRead = catchAsync(async (req, res, next) => {
+  // Update all tickets where isRead is false to true
+  const result = await ContactSupport.updateMany(
+    { isRead: false },
+    { isRead: true },
+    { multi: true }
+  );
+
+  res.status(200).json({
+    status: 'success',
+    message: 'All tickets marked as read successfully',
+    data: {
+      modifiedCount: result.modifiedCount,
+      matchedCount: result.matchedCount
+    }
+  });
+});
