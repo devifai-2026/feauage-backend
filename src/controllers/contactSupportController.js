@@ -44,17 +44,51 @@ exports.createContactSupport = catchAsync(async (req, res, next) => {
   }
 });
 
-// @desc    Get all contact support submissions
+// @desc    Get all contact support submissions with pagination & filters
 // @route   GET /api/v1/contact/getAllContactSupport
 // @access  Private/Admin
 exports.getAllContactSupport = catchAsync(async (req, res, next) => {
-  const contactSupports = await ContactSupport.find().sort('-createdAt');
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 20;
+  const skip = (page - 1) * limit;
+
+  // Build filter
+  const filter = {};
+  
+  // Status filter
+  if (req.query.status) {
+    filter.status = req.query.status;
+  }
+  
+  // Search filter (search in name, email, subject)
+  if (req.query.search) {
+    const searchRegex = new RegExp(req.query.search, 'i');
+    filter.$or = [
+      { fullName: searchRegex },
+      { email: searchRegex },
+      { subject: searchRegex }
+    ];
+  }
+
+  // Execute query in parallel for efficiency
+  const [contactSupports, total] = await Promise.all([
+    ContactSupport.find(filter)
+      .sort('-createdAt')
+      .skip(skip)
+      .limit(limit),
+    ContactSupport.countDocuments(filter)
+  ]);
+
+  const totalPages = Math.ceil(total / limit);
 
   res.status(200).json({
     status: 'success',
+    total,
+    totalPages,
+    currentPage: page,
     results: contactSupports.length,
     data: {
-      contactSupports
+      tickets: contactSupports
     }
   });
 });
