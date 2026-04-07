@@ -13,6 +13,9 @@ const AppError = require('../utils/appError');
 const Email = require('../services/emailService');
 const mongoose = require('mongoose');
 
+const { sendOtpEmail } = require('../services/brevoService');
+
+
 
 const signToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -182,20 +185,37 @@ const mergeGuestData = async (userId, guestId) => {
 exports.register = catchAsync(async (req, res, next) => {
   const { email, password, firstName, lastName, phone } = req.body;
 
-  // Check if user already exists
-  const existingUser = await User.findOne({ email });
-  if (existingUser) {
+  // Check if a verified user already exists
+  const verifiedUser = await User.findOne({ email, isEmailVerified: true });
+  if (verifiedUser) {
     return next(new AppError('User with this email already exists', 400));
   }
 
-  // Create user
-  const newUser = await User.create({
-    email,
-    password,
-    firstName,
-    lastName,
-    phone
-  });
+  // Check for unverified temporary user created by sendRegisterOtp
+  let newUser = await User.findOne({ email, isEmailVerified: false });
+  
+  if (newUser) {
+    // Update the existing temporary user with registration details
+    newUser.password = password;
+    newUser.firstName = firstName;
+    newUser.lastName = lastName;
+    newUser.phone = phone;
+    newUser.isActive = true;
+    newUser.isEmailVerified = true;  // Now mark email as fully verified
+    // Clear OTP fields as they're no longer needed
+    newUser.emailOtp = undefined;
+    newUser.emailOtpExpires = undefined;
+  } else {
+    // Create new user if no temporary record exists (direct registration without OTP)
+    newUser = await User.create({
+      email,
+      password,
+      firstName,
+      lastName,
+      phone,
+      isEmailVerified: true
+    });
+  }
 
   // Create cart for user
   const cart = await Cart.create({ user: newUser._id });
@@ -301,9 +321,9 @@ exports.login = catchAsync(async (req, res, next) => {
     return next(new AppError('Account is temporarily locked. Please try again later.', 423));
   }
 
-  // 6) Reset login attempts on successful login
+  // 6) Increment login attempts on successful login
   await user.updateOne({
-    $set: { loginAttempts: 0 },
+    $inc: { loginAttempts: 1 },
     $unset: { lockUntil: 1 },
     lastLogin: Date.now()
   });
@@ -443,30 +463,87 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
 exports.sendRegisterOtp = catchAsync(async (req, res, next) => {
   const { email } = req.body;
   if (!email) return next(new AppError('Please provide an email', 400));
-  
-  const existingUser = await User.findOne({ email });
+
+  // 1. Check if a verified user already exists
+  const existingUser = await User.findOne({ email, isEmailVerified: true });
   if (existingUser) {
     return next(new AppError('User with this email already exists', 400));
   }
-  
+
+  // 2. Generate 6-digit OTP
+  const otpCode = crypto.randomInt(100000, 999999).toString();
+  const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+  // 3. Find unverified user or create a temporary one
+  let user = await User.findOne({ email, isEmailVerified: false });
+
+  if (!user) {
+    // Create a temporary user (minimal data)
+    user = await User.create({
+      email,
+      password: crypto.randomBytes(20).toString('hex'), // dummy password, will be replaced later
+      firstName: 'Temporary',
+      lastName: 'User',
+      isActive: false,
+      isEmailVerified: false,
+      emailOtp: otpCode,
+      emailOtpExpires: expiresAt,
+    });
+  } else {
+    // Update OTP for existing unverified user
+    user.emailOtp = otpCode;
+    user.emailOtpExpires = expiresAt;
+    await user.save({ validateBeforeSave: false });
+  }
+
+  // 4. Send OTP via Brevo
+  try {
+    await sendOtpEmail(email, otpCode);
+  } catch (err) {
+    console.log('Error sending OTP email:', err);
+    return next(new AppError('Failed to send OTP email. Please try again later.', 500));
+  }
+
   res.status(200).json({
     status: 'success',
-    message: 'OTP sent successfully (Dummy OTP is 111111)'
+    message: 'OTP sent successfully to your email',
   });
 });
 
 // @desc Dummy verify OTP
 exports.verifyOtp = catchAsync(async (req, res, next) => {
-  const { otp } = req.body;
-  if (!otp) return next(new AppError('Please provide an OTP', 400));
-  
-  if (otp !== '111111') {
+  const { email, otp } = req.body;
+  console.log('Verify OTP - Received:', { email, otp });
+  if (!email || !otp) {
+    return next(new AppError('Please provide email and OTP', 400));
+  }
+
+  // Find user with a non-expired OTP
+  const user = await User.findOne({
+    email,
+    emailOtpExpires: { $gt: Date.now() },
+  }).select('+emailOtp'); // explicitly include OTP field
+
+  if (!user) {
+    return next(new AppError('Invalid or expired OTP', 400));
+  }
+
+  // Compare OTP
+  if (user.emailOtp !== otp) {
     return next(new AppError('Invalid OTP', 400));
   }
 
+  // Just clear OTP fields - do NOT mark email as verified yet
+  // The register endpoint will complete the registration and mark as verified
+  user.emailOtp = undefined;
+  user.emailOtpExpires = undefined;
+  user.isActive = true;  // Activate so they can register
+
+  await user.save();
+
   res.status(200).json({
     status: 'success',
-    message: 'OTP verified successfully'
+    message: 'OTP verified successfully. You can now complete your registration.',
   });
 });
 

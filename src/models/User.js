@@ -153,7 +153,12 @@ const userSchema = new mongoose.Schema({
     type: Date,
     select: false
   },
-  razorpayCustomerId: String
+  razorpayCustomerId: String,
+  emailOtp: {
+  type: String,
+  select: false   // OTP won't be returned by default in queries
+},
+emailOtpExpires: Date,
 }, {
   timestamps: true,
   toJSON: { virtuals: true },

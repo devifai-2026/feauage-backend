@@ -5,7 +5,7 @@ const settingsSchema = new mongoose.Schema({
     type: Number,
     default: 0.03,
     min: [0, 'GST rate cannot be negative'],
-    max: [1, 'GST rate cannot exceed 1']
+    max: [18, 'GST rate cannot exceed 18']
   },
   cgstRate: {
     type: Number,

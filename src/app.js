@@ -32,6 +32,7 @@ const flashSaleController = require('./controllers/flashSaleController');
 const bestSellerController = require('./controllers/bestSellerController');
 const featuredController = require('./controllers/featuredController');
 const supportController = require('./controllers/supportController');
+const contactSupportRoutes = require('./routes/contact');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -132,12 +133,14 @@ app.use('/api/v1/guest', guestRoutes);
 app.use('/api/v1/banners', bannerRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/promo-codes', promoRoutes);
+app.use('/api/v1/contact', contactSupportRoutes);
 app.get('/api/v1/settings', settingsController.getPublicSettings);
 app.get('/api/v1/updates', updateController.getActiveUpdates);
 app.get('/api/v1/flash-sale', flashSaleController.getActiveFlashSale);
 app.get('/api/v1/best-sellers', bestSellerController.getBestSellerSection);
 app.get('/api/v1/featured', featuredController.getFeaturedSection);
 app.post('/api/v1/support-tickets', supportController.createTicket);
+
 
 // Run Shiprocket connection test on startup
 const _shippingServiceStartup = new ShippingService();
