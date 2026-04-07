@@ -92,3 +92,54 @@ exports.getAllContactSupport = catchAsync(async (req, res, next) => {
     }
   });
 });
+
+// @desc    Update contact support ticket (mark as read, etc.)
+// @route   PATCH /api/v1/contact/updateContactSupport/:id
+// @access  Private/Admin
+exports.updateContactSupport = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { isRead } = req.body;
+
+  // Validate ID
+  if (!id || !id.match(/^[0-9a-fA-F]{24}$/)) {
+    return next(new AppError('Invalid ticket ID', 400));
+  }
+
+  // Validate request body (only allow updating isRead field)
+  const allowedUpdates = ['isRead'];
+  const updateKeys = Object.keys(req.body);
+  const isValidUpdate = updateKeys.every(key => allowedUpdates.includes(key));
+
+  if (!isValidUpdate) {
+    return next(new AppError('Invalid update fields. Only "isRead" can be updated.', 400));
+  }
+
+  // Build update object
+  const updateData = {};
+  if (isRead !== undefined) {
+    updateData.isRead = Boolean(isRead);
+  }
+
+  // Find and update the ticket
+  const updatedTicket = await ContactSupport.findByIdAndUpdate(
+    id,
+    updateData,
+    {
+      new: true,
+      runValidators: true
+    }
+  );
+
+  // Check if ticket exists
+  if (!updatedTicket) {
+    return next(new AppError('Support ticket not found', 404));
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Ticket updated successfully',
+    data: {
+      contactSupport: updatedTicket
+    }
+  });
+});

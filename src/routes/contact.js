@@ -5,5 +5,6 @@ const contactSupportController = require('../controllers/contactSupportControlle
 // Public routes for client application
 router.get('/getAllContactSupport', contactSupportController.getAllContactSupport);
 router.post('/createContactSupport', contactSupportController.createContactSupport);
+router.patch('/updateContactSupport/:id', contactSupportController.updateContactSupport);
 
 module.exports = router;
