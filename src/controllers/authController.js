@@ -367,7 +367,8 @@ getMe = catchAsync(async (req, res, next) => {
         gstRate: settings.gstRate,
         freeShippingThreshold: settings.freeShippingThreshold,
         metroShippingCharge: settings.metroShippingCharge,
-        standardShippingCharge: settings.standardShippingCharge
+        standardShippingCharge: settings.standardShippingCharge,
+        metroPincodes: settings.metroPincodes
       }
     }
   });
