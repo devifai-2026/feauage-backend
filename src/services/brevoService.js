@@ -1,4 +1,5 @@
 const SibApiV3Sdk = require('sib-api-v3-sdk');
+const { otpEmailTemplate, contactFormEmailTemplate } = require('../utils/emailTemplates');
 
 // Initialize the Brevo (Sendinblue) client
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
@@ -65,18 +66,7 @@ const sendOtpEmail = async (toEmail, otpCode) => {
         name: process.env.BREVO_SENDER_NAME,
       },
       subject: 'Your OTP for Registration',
-      htmlContent: `
-        <!DOCTYPE html>
-        <html>
-        <body>
-          <h2>Email Verification</h2>
-          <p>Your One-Time Password (OTP) for registration is:</p>
-          <h1 style="background:#f4f4f4; padding:10px; font-family:monospace;">${otpCode}</h1>
-          <p>This OTP is valid for 10 minutes.</p>
-          <p>If you didn't request this, please ignore this email.</p>
-        </body>
-        </html>
-      `,
+      htmlContent: otpEmailTemplate(otpCode),
     };
 
     return await sendEmail(emailData);
@@ -107,31 +97,7 @@ const sendContactFormEmail = async (formData, recipientEmail = process.env.BREVO
         name: formData.name
       },
       subject: `New Contact Form Message from ${formData.name}`,
-      htmlContent: `
-        <html>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0;">
-            <div style="max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-              <div style="background: #C19A6B; padding: 30px 20px; text-align: center;">
-                <h1 style="color: white; margin: 0; font-size: 28px;">AXELS JEWELRY</h1>
-                <p style="color: white; margin: 10px 0 0;">New Contact Form Submission</p>
-              </div>
-              <div style="padding: 40px 30px;">
-                <div style="margin-bottom: 30px;">
-                  <h3 style="color: #C19A6B; border-bottom: 2px solid #C19A6B; padding-bottom: 10px;">Sender Information</h3>
-                  <p><strong>Name:</strong> ${formData.name}</p>
-                  <p><strong>Email:</strong> ${formData.email}</p>
-                </div>
-                <div>
-                  <h3 style="color: #C19A6B; border-bottom: 2px solid #C19A6B; padding-bottom: 10px;">Message</h3>
-                  <div style="background: #f9f9f9; padding: 20px; border-radius: 5px;">
-                    ${formData.message.replace(/\n/g, '<br>')}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </body>
-        </html>
-      `
+      htmlContent: contactFormEmailTemplate(formData)
     };
 
     return await sendEmail(emailData);

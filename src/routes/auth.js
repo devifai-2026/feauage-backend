@@ -7,6 +7,7 @@ const {
   updateMe,
   updatePassword,
   forgotPassword,
+  verifyResetOtp,
   resetPassword,
   verifyEmail,
   resendVerification,
@@ -20,8 +21,8 @@ const router = express.Router();
 router.post('/register', register);
 router.post('/login', login);
 router.post('/forgot-password', forgotPassword);
-router.patch('/reset-password/:token', resetPassword);
-router.post('/reset-password/:token', resetPassword);
+router.post('/verify-reset-otp', verifyResetOtp);
+router.post('/reset-password', resetPassword);
 router.get('/verify-email/:token', verifyEmail);
 router.post('/resend-verification', resendVerification);
 

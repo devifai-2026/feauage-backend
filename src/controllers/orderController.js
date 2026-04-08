@@ -63,7 +63,7 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
   }
 
   // 3) Calculate totals and check stock
-  if (!cart.cartTotal) await cart.calculateTotals();
+   await cart.calculateTotals();
 
   let discountAmount = 0;
   if (couponCode) {
@@ -115,7 +115,8 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
   const settings = await Settings.getSettings();
   const shippingCharge = calculateShippingCharge(shippingAddress.pincode, cart.cartTotal, settings);
   const taxableAmount = cart.cartTotal - discountAmount;
-  const tax = taxableAmount * settings.gstRate;
+  // const tax = taxableAmount * settings.gstRate;
+  const tax = Math.round(taxableAmount * (settings.gstRate / 100));
   const grandTotal = cart.cartTotal - discountAmount + shippingCharge + tax;
 
   // Stock check
@@ -171,6 +172,7 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
   } catch (error) {
     console.error('Razorpay initiation failed:', error);
     return next(new AppError('Failed to initiate payment gateway', 500));
+    console.log('Razorpay initiation failed:', error);
   }
 });
 
@@ -318,7 +320,8 @@ exports.createOrder = catchAsync(async (req, res, next) => {
 
   // Calculate tax
   const taxableAmount = cart.cartTotal - discountAmount;
-  const tax = taxableAmount * settings.gstRate;
+  // const tax = taxableAmount * settings.gstRate;
+    const tax = Math.round(taxableAmount * (settings.gstRate / 100));
 
   // Calculate grand total
   const grandTotal = cart.cartTotal - discountAmount + shippingCharge + tax;
