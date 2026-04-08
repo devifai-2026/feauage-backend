@@ -8,10 +8,14 @@ const Wishlist = require('../models/Wishlist');
 const WishlistItem = require('../models/WishlistItem');
 const GuestUser = require('../models/GuestUser');
 const Analytics = require('../models/Analytics');
+const Settings = require('../models/Settings');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const Email = require('../services/emailService');
 const mongoose = require('mongoose');
+
+const { sendOtpEmail } = require('../services/brevoService');
+
 
 
 const signToken = (id) => {
@@ -182,20 +186,37 @@ const mergeGuestData = async (userId, guestId) => {
 exports.register = catchAsync(async (req, res, next) => {
   const { email, password, firstName, lastName, phone } = req.body;
 
-  // Check if user already exists
-  const existingUser = await User.findOne({ email });
-  if (existingUser) {
+  // Check if a verified user already exists
+  const verifiedUser = await User.findOne({ email, isEmailVerified: true });
+  if (verifiedUser) {
     return next(new AppError('User with this email already exists', 400));
   }
 
-  // Create user
-  const newUser = await User.create({
-    email,
-    password,
-    firstName,
-    lastName,
-    phone
-  });
+  // Check for unverified temporary user created by sendRegisterOtp
+  let newUser = await User.findOne({ email, isEmailVerified: false });
+  
+  if (newUser) {
+    // Update the existing temporary user with registration details
+    newUser.password = password;
+    newUser.firstName = firstName;
+    newUser.lastName = lastName;
+    newUser.phone = phone;
+    newUser.isActive = true;
+    newUser.isEmailVerified = true;  // Now mark email as fully verified
+    // Clear OTP fields as they're no longer needed
+    newUser.emailOtp = undefined;
+    newUser.emailOtpExpires = undefined;
+  } else {
+    // Create new user if no temporary record exists (direct registration without OTP)
+    newUser = await User.create({
+      email,
+      password,
+      firstName,
+      lastName,
+      phone,
+      isEmailVerified: true
+    });
+  }
 
   // Create cart for user
   const cart = await Cart.create({ user: newUser._id });
@@ -301,9 +322,9 @@ exports.login = catchAsync(async (req, res, next) => {
     return next(new AppError('Account is temporarily locked. Please try again later.', 423));
   }
 
-  // 6) Reset login attempts on successful login
+  // 6) Increment login attempts on successful login
   await user.updateOne({
-    $set: { loginAttempts: 0 },
+    $inc: { loginAttempts: 1 },
     $unset: { lockUntil: 1 },
     lastLogin: Date.now()
   });
@@ -329,15 +350,26 @@ exports.logout = (req, res) => {
 // @desc    Get current user
 // @route   GET /api/v1/auth/me
 // @access  Private
-exports.getMe = catchAsync(async (req, res, next) => {
+exports.
+
+getMe = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user.id)
     .populate('cart')
     .populate('wishlist');
 
+  const settings = await Settings.getSettings();
+
   res.status(200).json({
     status: 'success',
     data: {
-      user
+      user,
+      settings: {
+        gstRate: settings.gstRate,
+        freeShippingThreshold: settings.freeShippingThreshold,
+        metroShippingCharge: settings.metroShippingCharge,
+        standardShippingCharge: settings.standardShippingCharge,
+        metroPincodes: settings.metroPincodes
+      }
     }
   });
 });
@@ -399,40 +431,39 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
 // @route   POST /api/v1/auth/forgot-password
 // @access  Public
 exports.forgotPassword = catchAsync(async (req, res, next) => {
-  // 1) Get user based on POSTed email
-  const user = await User.findOne({ email: req.body.email });
+  const { email } = req.body;
+  const normalizedEmail = email ? email.trim().toLowerCase() : '';
+  
+  if (!normalizedEmail) return next(new AppError('Please provide an email', 400));
+
+  // 1) Get user based on email
+  const user = await User.findOne({ email: normalizedEmail });
   if (!user) {
     return next(new AppError('There is no user with that email address.', 404));
   }
 
-  // 2) Generate the random reset token
-  // Use dummy OTP "111111" for testing
-  const resetToken = '111111';
-  const hashedToken = crypto
-    .createHash('sha256')
-    .update(resetToken)
-    .digest('hex');
+  // 2) Generate a 6-digit OTP (padded with leading zeros)
+  const otpCode = String(crypto.randomInt(100000, 999999)).padStart(6, '0');
+  const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
-  user.passwordResetToken = hashedToken;
-  user.passwordResetExpires = Date.now() + 10 * 60 * 1000;
+  console.log(`[forgotPassword] Generated OTP: ${otpCode} for email: ${normalizedEmail}`);
+
+  // 3) Store OTP in user document
+  user.emailOtp = otpCode;
+  user.emailOtpExpires = expiresAt;
   await user.save({ validateBeforeSave: false });
 
-  // 3) Send it to user's email
+  // 4) Send OTP to user's email via Brevo
   try {
-    // Dummy: we don't actually send email, just return success
-    // If you'd like to still send it, the logic is below but commented.
-    /*
-    const resetURL = `${req.protocol}://${req.get('host')}/api/v1/auth/reset-password/${resetToken}`;
-    await new Email(user, resetURL).sendPasswordReset();
-    */
+    await sendOtpEmail(normalizedEmail, otpCode);
 
     res.status(200).json({
       status: 'success',
-      message: 'Token sent to email (Dummy OTP is 111111)'
+      message: 'Password reset OTP sent to your email'
     });
   } catch (err) {
-    user.passwordResetToken = undefined;
-    user.passwordResetExpires = undefined;
+    user.emailOtp = undefined;
+    user.emailOtpExpires = undefined;
     await user.save({ validateBeforeSave: false });
 
     return next(new AppError('There was an error sending the email. Try again later!', 500));
@@ -442,25 +473,137 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
 // @desc Dummy send register OTP
 exports.sendRegisterOtp = catchAsync(async (req, res, next) => {
   const { email } = req.body;
-  if (!email) return next(new AppError('Please provide an email', 400));
+  const normalizedEmail = email ? email.trim().toLowerCase() : '';
   
-  const existingUser = await User.findOne({ email });
+  if (!normalizedEmail) return next(new AppError('Please provide an email', 400));
+
+  // 1. Check if a verified user already exists
+  const existingUser = await User.findOne({ email: normalizedEmail, isEmailVerified: true });
   if (existingUser) {
     return next(new AppError('User with this email already exists', 400));
   }
-  
+
+  // 2. Generate 6-digit OTP (padded with leading zeros)
+  const otpCode = String(crypto.randomInt(100000, 999999)).padStart(6, '0');
+  const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+  console.log(`[sendRegisterOtp] Generated OTP: ${otpCode} for email: ${normalizedEmail}`);
+
+  // 3. Find unverified user or create a temporary one
+  let user = await User.findOne({ email: normalizedEmail, isEmailVerified: false });
+
+  if (!user) {
+    // Create a temporary user (minimal data)
+    user = await User.create({
+      email: normalizedEmail,
+      password: crypto.randomBytes(20).toString('hex'), // dummy password, will be replaced later
+      firstName: 'Temporary',
+      lastName: 'User',
+      isActive: false,
+      isEmailVerified: false,
+      emailOtp: otpCode,
+      emailOtpExpires: expiresAt,
+    });
+  } else {
+    // Update OTP for existing unverified user
+    user.emailOtp = otpCode;
+    user.emailOtpExpires = expiresAt;
+    await user.save({ validateBeforeSave: false });
+  }
+
+  // 4. Send OTP via Brevo
+  try {
+    await sendOtpEmail(normalizedEmail, otpCode);
+  } catch (err) {
+    console.log('Error sending OTP email:', err);
+    return next(new AppError('Failed to send OTP email. Please try again later.', 500));
+  }
+
   res.status(200).json({
     status: 'success',
-    message: 'OTP sent successfully (Dummy OTP is 111111)'
+    message: 'OTP sent successfully to your email',
   });
 });
 
 // @desc Dummy verify OTP
 exports.verifyOtp = catchAsync(async (req, res, next) => {
-  const { otp } = req.body;
-  if (!otp) return next(new AppError('Please provide an OTP', 400));
+  const { email, otp } = req.body;
   
-  if (otp !== '111111') {
+  // Normalize inputs: trim and convert to string
+  const normalizedEmail = email ? email.trim().toLowerCase() : '';
+  const normalizedOtp = otp ? String(otp).trim() : ''; // Convert to string & trim
+  
+  console.log('Verify OTP - Received:', { normalizedEmail, normalizedOtp, receivedOtp: otp });
+  
+  if (!normalizedEmail || !normalizedOtp) {
+    return next(new AppError('Please provide email and OTP', 400));
+  }
+
+  // Find user with a non-expired OTP
+  const user = await User.findOne({
+    email: normalizedEmail,
+    emailOtpExpires: { $gt: Date.now() },
+  }).select('+emailOtp'); // explicitly include OTP field
+
+  if (!user) {
+    console.log(`[verifyOtp] User not found or OTP expired for email: ${normalizedEmail}`);
+    return next(new AppError('Invalid or expired OTP', 400));
+  }
+
+  // Compare OTP - ensure both are strings
+  const storedOtp = String(user.emailOtp).trim();
+  console.log('OTP Comparison:', { stored: storedOtp, received: normalizedOtp, match: storedOtp === normalizedOtp });
+  
+  if (storedOtp !== normalizedOtp) {
+    return next(new AppError('Invalid OTP', 400));
+  }
+
+  // Just clear OTP fields - do NOT mark email as verified yet
+  // The register endpoint will complete the registration and mark as verified
+  user.emailOtp = undefined;
+  user.emailOtpExpires = undefined;
+  user.isActive = true;  // Activate so they can register
+
+  await user.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'OTP verified successfully. You can now complete your registration.',
+  });
+});
+
+// @desc    Verify password reset OTP
+// @route   POST /api/v1/auth/verify-reset-otp
+// @access  Public
+exports.verifyResetOtp = catchAsync(async (req, res, next) => {
+  const { email, otp } = req.body;
+
+  // Normalize inputs: trim and convert to string
+  const normalizedEmail = email ? email.trim().toLowerCase() : '';
+  const normalizedOtp = otp ? String(otp).trim() : ''; // Convert to string & trim
+  
+  console.log('Verify Reset OTP - Received:', { normalizedEmail, normalizedOtp, receivedOtp: otp });
+
+  if (!normalizedEmail || !normalizedOtp) {
+    return next(new AppError('Please provide email and OTP', 400));
+  }
+
+  // Find user with a non-expired OTP
+  const user = await User.findOne({
+    email: normalizedEmail,
+    emailOtpExpires: { $gt: Date.now() }
+  }).select('+emailOtp'); // explicitly include OTP field
+
+  if (!user) {
+    console.log(`[verifyResetOtp] User not found or OTP expired for email: ${normalizedEmail}`);
+    return next(new AppError('OTP is invalid or has expired', 400));
+  }
+
+  // Compare OTP - ensure both are strings
+  const storedOtp = String(user.emailOtp).trim();
+  console.log('Reset OTP Comparison:', { stored: storedOtp, received: normalizedOtp, match: storedOtp === normalizedOtp });
+  
+  if (storedOtp !== normalizedOtp) {
     return next(new AppError('Invalid OTP', 400));
   }
 
@@ -470,33 +613,43 @@ exports.verifyOtp = catchAsync(async (req, res, next) => {
   });
 });
 
-// @desc    Reset password
-// @route   PATCH /api/v1/auth/reset-password/:token
+// @desc    Reset password using OTP
+// @route   POST /api/v1/auth/reset-password
 // @access  Public
 exports.resetPassword = catchAsync(async (req, res, next) => {
-  // 1) Get user based on the token
-  const hashedToken = crypto
-    .createHash('sha256')
-    .update(req.params.token)
-    .digest('hex');
+  const { email, otp, password } = req.body;
 
-  const user = await User.findOne({
-    passwordResetToken: hashedToken,
-    passwordResetExpires: { $gt: Date.now() }
-  });
+  // Normalize inputs
+  const normalizedEmail = email ? email.trim().toLowerCase() : '';
+  const normalizedOtp = otp ? String(otp).trim() : '';
 
-  // 2) If token has not expired, and there is user, set the new password
-  if (!user) {
-    return next(new AppError('Token is invalid or has expired', 400));
+  if (!normalizedEmail || !normalizedOtp || !password) {
+    return next(new AppError('Please provide email, OTP, and new password', 400));
   }
 
-  // 3) Update changedPasswordAt property for the user
-  user.password = req.body.password;
-  user.passwordResetToken = undefined;
-  user.passwordResetExpires = undefined;
+  // 1) Verify OTP again
+  const user = await User.findOne({
+    email: normalizedEmail,
+    emailOtpExpires: { $gt: Date.now() }
+  }).select('+emailOtp');
+
+  if (!user) {
+    return next(new AppError('OTP is invalid or has expired', 400));
+  }
+
+  // Compare OTP
+  const storedOtp = String(user.emailOtp).trim();
+  if (storedOtp !== normalizedOtp) {
+    return next(new AppError('Invalid OTP', 400));
+  }
+
+  // 2) Set the new password and clear OTP fields
+  user.password = password;
+  user.emailOtp = undefined;
+  user.emailOtpExpires = undefined;
   await user.save();
 
-  // 4) Log the user in, send JWT
+  // 3) Log the user in, send JWT
   await createSendToken(user, 200, res);
 });
 
