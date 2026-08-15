@@ -507,8 +507,11 @@ exports.sendRegisterOtp = catchAsync(async (req, res, next) => {
 
   // 3. Find unverified user or create a temporary one
   let user = await User.findOne({ email: normalizedEmail, isEmailVerified: false });
+  // Track whether this call created the row, so a failed send can undo it
+  let createdHere = false;
 
   if (!user) {
+    createdHere = true;
     // Create a temporary user (minimal data)
     user = await User.create({
       email: normalizedEmail,
@@ -532,6 +535,14 @@ exports.sendRegisterOtp = catchAsync(async (req, res, next) => {
     await sendOtpEmail(normalizedEmail, otpCode);
   } catch (err) {
     console.error('Error sending OTP email:', err.message);
+
+    // The placeholder row exists only to carry the OTP. If the OTP never went
+    // out it is unreachable, so remove it — otherwise every failed send leaves
+    // an orphaned "Temporary User" in the accounts list forever.
+    if (createdHere) {
+      await User.deleteOne({ _id: user._id }).catch(() => {});
+    }
+
     // 503, not 500: the application is fine, the mail provider is unavailable
     // or unconfigured. Say so, so the operator knows where to look.
     return next(
