@@ -63,6 +63,7 @@ const {
   // Shiprocket integration
   createShipment,
   getAvailableCouriers,
+  generateAWB,
   schedulePickup,
   trackShipment,
   cancelShipment,
@@ -178,14 +179,19 @@ const {
   uploadCategoryImage: uploadCategoryImageMiddleware,
   uploadGenericSingle,
   uploadGenericMultiple,
+  requireStorageConfigured,
 } = require("../middleware/upload");
 const { uploadImage, uploadImages } = require("../controllers/admin/s3Controller");
 
 const router = express.Router();
-router.get("/categories", getAllCategories);
-// All admin routes require authentication and admin role
+
+// All admin routes require authentication and admin role.
+// (The storefront reads categories from the public GET /api/v1/categories,
+// so this no longer needs a public escape hatch above the guard.)
 router.use(protect);
 router.use(restrictTo("admin", "superadmin"));
+
+router.get("/categories", getAllCategories);
 
 // Dashboard routes
 router.get("/dashboard/stats", getDashboardStats);
@@ -209,6 +215,7 @@ router.get("/products/out-of-stock", getOutOfStockProducts);
 router.post("/products/bulk-update", bulkUpdateProducts);
 router.post(
   "/products/:id/images",
+  requireStorageConfigured,
   uploadProductImagesMiddleware,
   uploadProductImages
 );
@@ -254,6 +261,7 @@ router.patch("/orders/:id/payment-status", updatePaymentStatus);
 // Shiprocket integration routes
 router.post("/orders/:id/create-shipment", createShipment);
 router.get("/orders/:id/available-couriers", getAvailableCouriers);
+router.post("/orders/:id/generate-awb", generateAWB);
 router.post("/orders/:id/schedule-pickup", schedulePickup);
 router.get("/orders/:id/track-shipment", trackShipment);
 router.post("/orders/:id/cancel-shipment", cancelShipment);
@@ -279,6 +287,7 @@ router.get("/banners/page/:page", getBannersByPage);
 router.post("/banners", createBanner);
 router.post(
   "/banners/:id/upload-image",
+  requireStorageConfigured,
   uploadBannerImageMiddleware,
   uploadBannerImage
 );
@@ -316,8 +325,8 @@ router.delete("/profile/image", deleteProfileImage);
 router.get("/profile/activity", getActivityLog);
 
 // Upload routes (S3)
-router.post("/upload", uploadGenericSingle, uploadImage);
-router.post("/upload-multiple", uploadGenericMultiple, uploadImages);
+router.post("/upload", requireStorageConfigured, uploadGenericSingle, uploadImage);
+router.post("/upload-multiple", requireStorageConfigured, uploadGenericMultiple, uploadImages);
 
 // Review management
 // Review management

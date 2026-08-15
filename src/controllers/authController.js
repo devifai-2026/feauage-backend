@@ -24,8 +24,17 @@ const signToken = (id) => {
   });
 };
 
+// Refresh tokens are long-lived and carry a `type` claim so they can never be
+// accepted as access tokens (and vice versa) — see protect() in middleware/auth.
+const signRefreshToken = (id) => {
+  return jwt.sign({ id, type: 'refresh' }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d'
+  });
+};
+
 const createSendToken = async (user, statusCode, res, guestId = null) => {
   const token = signToken(user._id);
+  const refreshToken = signRefreshToken(user._id);
 
   // Merge guest data if guestId is provided
   if (guestId) {
@@ -38,9 +47,16 @@ const createSendToken = async (user, statusCode, res, guestId = null) => {
 
   res.status(statusCode).json({
     status: 'success',
+    // `token` stays top-level for existing clients; `data.tokens` is the shape
+    // the refresh helpers in both frontends read.
     token,
+    refreshToken,
     data: {
-      user
+      user,
+      tokens: {
+        accessToken: token,
+        refreshToken
+      }
     }
   });
 };
@@ -515,8 +531,16 @@ exports.sendRegisterOtp = catchAsync(async (req, res, next) => {
   try {
     await sendOtpEmail(normalizedEmail, otpCode);
   } catch (err) {
-    console.log('Error sending OTP email:', err);
-    return next(new AppError('Failed to send OTP email. Please try again later.', 500));
+    console.error('Error sending OTP email:', err.message);
+    // 503, not 500: the application is fine, the mail provider is unavailable
+    // or unconfigured. Say so, so the operator knows where to look.
+    return next(
+      new AppError(
+        'We could not send the verification email right now. Please try again shortly. ' +
+          '(If this persists, the email provider may not be configured — check BREVO_API_KEY.)',
+        503
+      )
+    );
   }
 
   res.status(200).json({
@@ -732,21 +756,27 @@ exports.resendVerification = catchAsync(async (req, res, next) => {
   }
 });
 
-// @desc    Refresh token
+// @desc    Exchange a refresh token for a fresh access token
 // @route   POST /api/v1/auth/refresh-token
-// @access  Private
+// @access  Public — deliberately NOT behind protect(), since the whole point is
+//          that the caller's access token has already expired.
 exports.refreshToken = catchAsync(async (req, res, next) => {
-  // Get token from header
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return next(new AppError('Please provide a token', 401));
+  const suppliedToken = req.body.refreshToken;
+
+  if (!suppliedToken) {
+    return next(new AppError('Please provide a refresh token', 401));
   }
 
-  const token = authHeader.split(' ')[1];
-
   try {
-    // Verify token
-    const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
+    const decoded = await promisify(jwt.verify)(
+      suppliedToken,
+      process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET
+    );
+
+    // Reject access tokens presented as refresh tokens
+    if (decoded.type !== 'refresh') {
+      return next(new AppError('Invalid refresh token', 401));
+    }
 
     // Check if user still exists
     const currentUser = await User.findById(decoded.id);
@@ -759,14 +789,26 @@ exports.refreshToken = catchAsync(async (req, res, next) => {
       return next(new AppError('User recently changed password! Please log in again.', 401));
     }
 
-    // Create new token
-    const newToken = signToken(currentUser._id);
+    if (!currentUser.isActive) {
+      return next(new AppError('Your account has been deactivated.', 403));
+    }
+
+    // Rotate both tokens
+    const accessToken = signToken(currentUser._id);
+    const refreshToken = signRefreshToken(currentUser._id);
 
     res.status(200).json({
       status: 'success',
-      token: newToken
+      token: accessToken,
+      refreshToken,
+      data: {
+        tokens: {
+          accessToken,
+          refreshToken
+        }
+      }
     });
   } catch (error) {
-    return next(new AppError('Invalid token', 401));
+    return next(new AppError('Invalid or expired refresh token', 401));
   }
 });

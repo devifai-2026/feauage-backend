@@ -3,8 +3,11 @@ const socketIO = require('socket.io');
 let io;
 
 exports.initializeSocket = (server) => {
-  // Allow multiple origins for development and production
+  // Allow multiple origins for development and production.
+  // CORS_ORIGINS (comma-separated) is the deployment-facing setting and must
+  // include the admin panel too — order notifications are pushed to it.
   const allowedOrigins = [
+    ...(process.env.CORS_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean),
     process.env.CLIENT_URL,
     'http://localhost:3000',
     'http://localhost:5173',

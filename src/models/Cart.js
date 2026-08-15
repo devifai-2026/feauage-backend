@@ -99,9 +99,20 @@ cartSchema.methods.calculateTotals = async function() {
   this.discountTotal = discountTotal;
   this.grandTotal = cartTotal;
   this.lastUpdated = Date.now();
-  
-  await this.save();
-  
+
+  try {
+    await this.save();
+  } catch (err) {
+    // The cart row can disappear underneath us (concurrent clear/delete, or a
+    // parallel request that won a create race). Recomputing totals is not worth
+    // failing the whole GET /cart over — the caller still gets correct numbers.
+    if (err.name === 'DocumentNotFoundError') {
+      console.warn(`[Cart] totals not persisted; cart ${this._id} no longer exists`);
+    } else {
+      throw err;
+    }
+  }
+
   return {
     cartTotal: this.cartTotal,
     discountTotal: this.discountTotal,

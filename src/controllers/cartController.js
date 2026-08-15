@@ -59,11 +59,28 @@ exports.getCart = catchAsync(async (req, res, next) => {
       try {
         cart = new Cart({ guestId });
         // Validate to ensure no defaults are setting user to null
-        cart.user = undefined; 
+        cart.user = undefined;
         await cart.save();
       } catch (err) {
-        console.error('Guest Cart Creation Error:', err);
-        throw err;
+        // The storefront issues GET /cart more than once on load, so two
+        // requests can both miss and both try to create. Losing that race is
+        // not an error — just read back the cart the winner created.
+        if (err.code === 11000) {
+          cart = await Cart.findOne({ guestId })
+            .populate({
+              path: 'items',
+              populate: {
+                path: 'product',
+                select: 'name slug sellingPrice offerPrice isOnOffer stockQuantity stockStatus images',
+                populate: { path: 'images', match: { isPrimary: true } }
+              }
+            })
+            .populate('couponApplied');
+        }
+        if (!cart) {
+          console.error('Guest Cart Creation Error:', err);
+          throw err;
+        }
       }
     }
   }

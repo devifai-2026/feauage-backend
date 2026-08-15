@@ -26,6 +26,8 @@ const guestRoutes = require('./routes/guest');
 const bannerRoutes = require('./routes/banners');
 const paymentRoutes = require('./routes/payments');
 const promoRoutes = require('./routes/promo');
+const categoryRoutes = require('./routes/categories');
+const { getAllSubcategories } = require('./controllers/categoryController');
 const settingsController = require('./controllers/settingsController');
 const updateController = require('./controllers/updateController');
 const flashSaleController = require('./controllers/flashSaleController');
@@ -47,8 +49,27 @@ const app = express();
 
 // Implement CORS
 
+// Comma-separated list of allowed origins, e.g.
+//   CORS_ORIGINS=https://feauag-shop.onrender.com,https://feauag-admin.onrender.com
+// When unset, every origin is reflected — convenient locally, too open for
+// production, so set it on any deployed environment.
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
+if (!allowedOrigins.length && process.env.NODE_ENV === 'production') {
+  console.warn('[CORS] ⚠️  CORS_ORIGINS is not set — all origins will be accepted.');
+}
+
 app.use(cors({
-  origin: true, // Allows all origins (for testing only!)
+  origin: allowedOrigins.length
+    ? (origin, cb) => {
+        // Same-origin/server-to-server requests arrive with no Origin header
+        if (!origin) return cb(null, true);
+        cb(null, allowedOrigins.includes(origin.replace(/\/+$/, '')));
+      }
+    : true,
   credentials: true
 }));
 
@@ -133,6 +154,8 @@ app.use('/api/v1/guest', guestRoutes);
 app.use('/api/v1/banners', bannerRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/promo-codes', promoRoutes);
+app.use('/api/v1/categories', categoryRoutes);
+app.get('/api/v1/subcategories', getAllSubcategories);
 app.use('/api/v1/contact', contactSupportRoutes);
 app.get('/api/v1/settings', settingsController.getPublicSettings);
 app.get('/api/v1/updates', updateController.getActiveUpdates);

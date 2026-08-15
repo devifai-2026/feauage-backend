@@ -101,12 +101,12 @@ const bannerSchema = new mongoose.Schema({
   },
   page: {
     type: String,
-    enum: ['home', 'category', 'product', 'cart', 'checkout', 'all'],
+    enum: ['home', 'category', 'product', 'about', 'cart', 'checkout', 'all'],
     default: 'home'
   },
   position: {
     type: String,
-    enum: ['top', 'middle', 'bottom', 'sidebar', 'popup', 'hero'],
+    enum: ['top', 'middle', 'bottom', 'sidebar', 'menu', 'popup', 'hero'],
     default: 'top'
   },
   displayOrder: {
