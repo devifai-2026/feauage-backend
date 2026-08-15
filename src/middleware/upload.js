@@ -8,13 +8,43 @@ const AppError = require('../utils/appError');
 // AWS S3 CONFIG
 // =============================
 
+// Only pass explicit credentials when they are actually set. Passing empty
+// strings makes the SDK fall through to the machine's ambient AWS profile,
+// which silently uploads to whatever account happens to be configured.
+const hasExplicitCreds = Boolean(
+  process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+);
+
 const s3 = new S3Client({
   region: process.env.AWS_REGION || 'ap-south-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
+  ...(hasExplicitCreds
+    ? {
+        credentials: {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        },
+      }
+    : {}),
 });
+
+// Uploads need a bucket AND credentials. Without them the AWS SDK throws a
+// low-level error (PermanentRedirect / CredentialsProviderError) that reaches
+// the admin as an unreadable stack trace, making the panel look broken.
+const isStorageConfigured = () =>
+  Boolean(process.env.AWS_S3_BUCKET_NAME) && hasExplicitCreds;
+
+const requireStorageConfigured = (req, res, next) => {
+  if (!isStorageConfigured()) {
+    return next(
+      new AppError(
+        'Image uploads are not configured on this server. Set AWS_S3_BUCKET_NAME, ' +
+          'AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in the backend .env, then restart.',
+        503
+      )
+    );
+  }
+  next();
+};
 
 // =============================
 // FILE FILTER
@@ -41,7 +71,11 @@ const fileFilter = (req, file, cb) => {
 const createStorage = (folder) =>
   multerS3({
     s3,
-    bucket: process.env.AWS_S3_BUCKET_NAME,
+    // multer-s3 throws "bucket is required" at module-load time when this is
+    // undefined, which takes the whole server down on boot. Fall back to a
+    // placeholder; requireStorageConfigured rejects the request long before
+    // any upload is actually attempted against it.
+    bucket: process.env.AWS_S3_BUCKET_NAME || 'unconfigured-bucket',
     contentType: multerS3.AUTO_CONTENT_TYPE,
 
     metadata: (req, file, cb) => {
@@ -77,6 +111,9 @@ const createUploader = (folder, sizeMB = 5) =>
 // =============================
 
 module.exports = {
+  isStorageConfigured,
+  requireStorageConfigured,
+
   // Products (max 10 images)
   uploadProductImages: createUploader('products', 5).array(
     'images',
@@ -112,7 +149,7 @@ module.exports = {
   uploadGenericSingle: multer({
     storage: multerS3({
       s3,
-      bucket: process.env.AWS_S3_BUCKET_NAME,
+      bucket: process.env.AWS_S3_BUCKET_NAME || 'unconfigured-bucket',
       contentType: multerS3.AUTO_CONTENT_TYPE,
       key: (req, file, cb) => {
         const folder = (
@@ -137,7 +174,7 @@ module.exports = {
   uploadGenericMultiple: multer({
     storage: multerS3({
       s3,
-      bucket: process.env.AWS_S3_BUCKET_NAME,
+      bucket: process.env.AWS_S3_BUCKET_NAME || 'unconfigured-bucket',
       contentType: multerS3.AUTO_CONTENT_TYPE,
       key: (req, file, cb) => {
         const folder = (

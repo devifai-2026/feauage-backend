@@ -26,6 +26,13 @@ exports.protect = async (req, res, next) => {
     // 2) Verification token
     const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
+    // Refresh tokens are only valid at /auth/refresh-token, never as credentials
+    if (decoded.type === 'refresh') {
+      return next(
+        new AppError('Invalid token. Please log in to get access.', 401)
+      );
+    }
+
     // 3) Check if user still exists
     const currentUser = await User.findById(decoded.id);
     if (!currentUser) {

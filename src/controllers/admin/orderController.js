@@ -1320,6 +1320,84 @@ exports.getAvailableCouriers = catchAsync(async (req, res, next) => {
 });
 
 
+// @desc    Generate AWB (Air Waybill) for an existing shipment
+// @route   POST /api/v1/admin/orders/:id/generate-awb
+// @access  Private/Admin
+exports.generateAWB = catchAsync(async (req, res, next) => {
+  const order = await Order.findById(req.params.id);
+
+  if (!order) {
+    return next(new AppError('Order not found', 404));
+  }
+
+  if (!order.shiprocketShipmentId) {
+    return next(new AppError('Shipment not created yet. Create the shipment first.', 400));
+  }
+
+  if (order.shiprocketAWB) {
+    return next(new AppError(`AWB already generated for this order (${order.shiprocketAWB})`, 400));
+  }
+
+  const { courierId } = req.body;
+
+  if (!courierId) {
+    return next(new AppError('courierId is required to generate an AWB', 400));
+  }
+
+  try {
+    const awbResponse = await shippingService.generateAWB(
+      order.shiprocketShipmentId,
+      courierId
+    );
+
+    // Shiprocket nests the assignment payload under response.data
+    const awbData = awbResponse.response?.data || {};
+
+    if (!awbData.awb_code) {
+      return next(new AppError(
+        awbResponse.message || 'Shiprocket did not return an AWB code',
+        502
+      ));
+    }
+
+    order.shiprocketAWB = awbData.awb_code;
+    order.trackingNumber = awbData.awb_code;
+    if (awbData.courier_name) order.courierName = awbData.courier_name;
+    await order.save();
+
+    // Log admin activity
+    await AdminActivity.logActivity({
+      adminUser: req.user.id,
+      action: 'generate_awb',
+      entityType: 'Order',
+      entityId: order._id,
+      metadata: {
+        orderId: order.orderId,
+        awb: awbData.awb_code,
+        courierName: awbData.courier_name
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'AWB generated successfully',
+      data: {
+        awb: awbData.awb_code,
+        courierName: awbData.courier_name,
+        order
+      }
+    });
+  } catch (error) {
+    console.error('Shiprocket AWB error:', error.response?.data || error.message);
+    return next(new AppError(
+      error.response?.data?.message || 'Failed to generate AWB',
+      500
+    ));
+  }
+});
+
 // @desc    Schedule pickup for shipment
 // @route   POST /api/v1/admin/orders/:id/schedule-pickup
 // @access  Private/Admin

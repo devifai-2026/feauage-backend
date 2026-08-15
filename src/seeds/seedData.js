@@ -80,7 +80,9 @@ const seedDatabase = async () => {
     console.log('🗑️  Existing data cleared');
     
     // 1. Create Admin User
-    const adminPassword = await bcrypt.hash(process.env.ADMIN_PASSWORD || 'Admin@123456', 12);
+    // NOTE: pass the plaintext password — User's pre('save') hook hashes it.
+    // Hashing here as well would double-hash and make login impossible.
+    const adminPassword = process.env.ADMIN_PASSWORD || 'Admin@123456';
     const admin = await User.create({
       email: process.env.ADMIN_EMAIL || 'admin@jewellery.com',
       password: adminPassword,
@@ -95,7 +97,7 @@ const seedDatabase = async () => {
     console.log('✅ Admin user created');
     
     // 2. Create Sample Customer
-    const customerPassword = await bcrypt.hash('Customer@123', 12);
+    const customerPassword = 'Customer@123';
     const customer = await User.create({
       email: 'customer@example.com',
       password: customerPassword,
@@ -132,7 +134,7 @@ const seedDatabase = async () => {
         name: 'Earrings',
         slug: generateSlug('Earrings'),
         description: 'Beautiful earrings for all occasions',
-        image: 'https://example.com/earrings.jpg',
+        image: 'https://images.unsplash.com/photo-1602751584552-8ba73aad10e1?w=1200&q=80',
         icon: '💎',
         displayOrder: 1,
         createdBy: admin._id
@@ -141,7 +143,7 @@ const seedDatabase = async () => {
         name: 'Necklaces',
         slug: generateSlug('Necklaces'),
         description: 'Elegant necklaces and pendants',
-        image: 'https://example.com/necklaces.jpg',
+        image: 'https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=1200&q=80',
         icon: '📿',
         displayOrder: 2,
         createdBy: admin._id
@@ -150,7 +152,7 @@ const seedDatabase = async () => {
         name: 'Bracelets',
         slug: generateSlug('Bracelets'),
         description: 'Stylish bracelets and bangles',
-        image: 'https://example.com/bracelets.jpg',
+        image: 'https://images.unsplash.com/photo-1611652022419-a9419f74343d?w=1200&q=80',
         icon: '💫',
         displayOrder: 3,
         createdBy: admin._id
@@ -159,7 +161,7 @@ const seedDatabase = async () => {
         name: 'Rings',
         slug: generateSlug('Rings'),
         description: 'Engagement and wedding rings',
-        image: 'https://example.com/rings.jpg',
+        image: 'https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=1200&q=80',
         icon: '💍',
         displayOrder: 4,
         createdBy: admin._id
@@ -168,7 +170,7 @@ const seedDatabase = async () => {
         name: 'Brooches',
         slug: generateSlug('Brooches'),
         description: 'Decorative brooches and pins',
-        image: 'https://example.com/brooches.jpg',
+        image: 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=1200&q=80',
         icon: '🧷',
         displayOrder: 5,
         createdBy: admin._id
@@ -177,7 +179,7 @@ const seedDatabase = async () => {
         name: 'Watches',
         slug: generateSlug('Watches'),
         description: 'Luxury and casual watches',
-        image: 'https://example.com/watches.jpg',
+        image: 'https://images.unsplash.com/photo-1617038220319-276d3cfab638?w=1200&q=80',
         icon: '⌚',
         displayOrder: 6,
         createdBy: admin._id
@@ -186,7 +188,7 @@ const seedDatabase = async () => {
         name: "Men's Jewelry",
         slug: generateSlug("Men's Jewelry"),
         description: 'Jewelry specifically for men',
-        image: 'https://example.com/mens-jewelry.jpg',
+        image: 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&q=80',
         icon: '👔',
         displayOrder: 7,
         createdBy: admin._id
@@ -195,7 +197,7 @@ const seedDatabase = async () => {
         name: 'Accessories',
         slug: generateSlug('Accessories'),
         description: 'Fashion accessories and complementary items',
-        image: 'https://example.com/accessories.jpg',
+        image: 'https://images.unsplash.com/photo-1573408301185-9146fe634ad0?w=1200&q=80',
         icon: '👜',
         displayOrder: 8,
         createdBy: admin._id
@@ -315,7 +317,7 @@ const seedDatabase = async () => {
     const productImages = [
       {
         product: createdProducts[0]._id,
-        url: 'https://example.com/gold-earrings-1.jpg',
+        url: 'https://images.unsplash.com/photo-1602751584552-8ba73aad10e1?w=1200&q=80',
         altText: '24K Gold Stud Earrings',
         isPrimary: true,
         displayOrder: 1,
@@ -323,7 +325,7 @@ const seedDatabase = async () => {
       },
       {
         product: createdProducts[1]._id,
-        url: 'https://example.com/silver-necklace-1.jpg',
+        url: 'https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=1200&q=80',
         altText: 'Silver Pendant Necklace',
         isPrimary: true,
         displayOrder: 1,
@@ -331,7 +333,7 @@ const seedDatabase = async () => {
       },
       {
         product: createdProducts[2]._id,
-        url: 'https://example.com/platinum-ring-1.jpg',
+        url: 'https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=1200&q=80',
         altText: 'Platinum Diamond Ring',
         isPrimary: true,
         displayOrder: 1,
@@ -407,44 +409,211 @@ const seedDatabase = async () => {
     console.log('✅ Coupons created');
     
     // 9. Create Banners
+    // One entry per storefront slot. Every image the storefront renders comes
+    // from here (or from Categories/Products), so each slot the FE queries must
+    // have a banner or that section renders its shared placeholder instead.
+    const img = (id, extra = {}) => ({
+      url: `https://images.unsplash.com/${id}?w=1600&q=80`,
+      ...extra
+    });
+
     const banners = [
+      // Homepage hero carousel — Navbar.jsx (page=home, position=top)
       {
-        title: 'Summer Collection 2024',
-        subtitle: 'Up to 40% off on Gold Jewelry',
-        image: 'https://example.com/banner1.jpg',
-        mobileImage: 'https://example.com/banner1-mobile.jpg',
-        linkType: 'category',
-        linkTarget: earringsCategory._id,
+        name: 'homepage-carousel',
+        title: 'DISCOVER SPARKLE WITH STYLE',
+        subheader: 'Whether casual or formal, find the perfect jewelry for every occasion.',
+        buttonText: 'Shop Now',
+        redirectUrl: '/categories',
+        // 'header' matches the "Homepage Top Carousel" admin preset; the
+        // storefront filters on it to keep promo cards out of the carousel.
+        bannerType: 'header',
         page: 'home',
         position: 'top',
         displayOrder: 1,
+        images: [
+          img('photo-1515562141207-7a88fb7ce338', { title: 'DISCOVER SPARKLE WITH STYLE', subtitle: 'Timeless pieces for every occasion', displayOrder: 1, isPrimary: true }),
+          img('photo-1611652022419-a9419f74343d', { title: 'THE GOLD EDIT', subtitle: 'Handcrafted 22K designs', displayOrder: 2 }),
+          img('photo-1599643478518-a784e5dc4c8f', { title: 'DIAMONDS, REIMAGINED', subtitle: 'Brilliance that lasts forever', displayOrder: 3 }),
+          img('photo-1573408301185-9146fe634ad0', { title: 'BRIDAL COLLECTION', subtitle: 'For the day you will never forget', displayOrder: 4 })
+        ],
         isActive: true,
-        startDate: new Date(),
-        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        createdBy: admin._id
+      },
+      // Cleopatra hero section — CleopatraGlam.jsx (bannerType=hero)
+      {
+        name: 'homepage-hero-cleopatra',
+        title: 'CLEOPATRA GLAM',
+        subheader: 'Bold statement pieces inspired by ancient royalty',
+        buttonText: 'Explore Collection',
+        redirectUrl: '/categories',
+        bannerType: 'hero',
+        page: 'home',
+        position: 'hero',
+        displayOrder: 1,
+        images: [img('photo-1602751584552-8ba73aad10e1', { isPrimary: true })],
+        isActive: true,
+        createdBy: admin._id
+      },
+      // Promotional card — CleopatraGlam.jsx (bannerType=promotional)
+      {
+        name: 'homepage-promotional',
+        title: 'FESTIVE OFFER',
+        subheader: 'Flat 25% off on all diamond jewellery',
+        buttonText: 'Grab the Deal',
+        redirectUrl: '/categories',
+        bannerType: 'promotional',
+        page: 'home',
+        position: 'top',
+        displayOrder: 2,
+        images: [img('photo-1535632066927-ab7c9ab60908', { isPrimary: true })],
+        isActive: true,
+        createdBy: admin._id
+      },
+      // Explore products strip — ExploreProducts.jsx (position=middle)
+      {
+        name: 'homepage-middle',
+        title: 'EXPLORE OUR WORLD',
+        subheader: 'Curated collections for every mood',
+        bannerType: 'header',
+        page: 'home',
+        position: 'middle',
+        displayOrder: 1,
+        images: [img('photo-1617038220319-276d3cfab638', { isPrimary: true })],
+        isActive: true,
+        createdBy: admin._id
+      },
+      // Best-seller sale card — BestSeller.jsx (position=sidebar)
+      {
+        name: 'homepage-sidebar-sale',
+        title: 'BEST SELLERS',
+        subheader: 'Loved by thousands of customers',
+        buttonText: 'Shop Best Sellers',
+        redirectUrl: '/categories',
+        bannerType: 'header',
+        page: 'home',
+        position: 'sidebar',
+        displayOrder: 1,
+        images: [img('photo-1605100804763-247f67b3557e', { isPrimary: true })],
+        isActive: true,
+        createdBy: admin._id
+      },
+      // Pre-footer category tiles — TopFooter.jsx (position=bottom)
+      // Moved off `sidebar` so it no longer collides with BestSeller.
+      {
+        name: 'homepage-bottom-tiles',
+        title: 'SHOP BY OCCASION',
+        bannerType: 'header',
+        page: 'home',
+        position: 'bottom',
+        displayOrder: 1,
+        images: [
+          img('photo-1605100804763-247f67b3557e', { title: 'Engagement Rings', displayOrder: 1, isPrimary: true }),
+          img('photo-1573408301185-9146fe634ad0', { title: 'Wedding Bands', displayOrder: 2 }),
+          img('photo-1599643478518-a784e5dc4c8f', { title: 'Diamond Jewelry', displayOrder: 3 }),
+          img('photo-1611652022419-a9419f74343d', { title: 'Luxury Collection', displayOrder: 4 })
+        ],
+        isActive: true,
+        createdBy: admin._id
+      },
+      // Navbar mega-menu thumbnails — Navbar.jsx (position=menu)
+      {
+        name: 'navbar-menu-tiles',
+        title: 'Navigation Menu Imagery',
+        bannerType: 'header',
+        page: 'home',
+        position: 'menu',
+        displayOrder: 1,
+        images: [
+          img('photo-1515562141207-7a88fb7ce338', { title: 'All Jewellery', displayOrder: 1, isPrimary: true }),
+          img('photo-1611652022419-a9419f74343d', { title: 'Gold', displayOrder: 2 }),
+          img('photo-1599643478518-a784e5dc4c8f', { title: 'Diamond', displayOrder: 3 }),
+          img('photo-1573408301185-9146fe634ad0', { title: 'Bridal', displayOrder: 4 }),
+          img('photo-1602751584552-8ba73aad10e1', { title: 'Earrings', displayOrder: 5 }),
+          img('photo-1535632066927-ab7c9ab60908', { title: 'Necklaces', displayOrder: 6 })
+        ],
+        isActive: true,
+        createdBy: admin._id
+      },
+      // Category listing page — Category.jsx
+      {
+        name: 'category-top',
+        title: 'OUR COLLECTIONS',
+        subheader: 'Find the piece that speaks to you',
+        bannerType: 'header',
+        page: 'category',
+        position: 'top',
+        displayOrder: 1,
+        images: [img('photo-1617038220319-276d3cfab638', { isPrimary: true })],
+        isActive: true,
         createdBy: admin._id
       },
       {
-        title: 'New Arrivals',
-        subtitle: 'Latest Designs Just Landed',
-        image: 'https://example.com/banner2.jpg',
-        mobileImage: 'https://example.com/banner2-mobile.jpg',
-        linkType: 'collection',
-        linkTarget: 'new-arrivals',
-        page: 'home',
+        name: 'category-bottom',
+        title: 'CRAFTED WITH CARE',
+        subheader: 'Every piece hallmarked and certified',
+        bannerType: 'footer',
+        page: 'category',
+        position: 'bottom',
+        displayOrder: 1,
+        images: [img('photo-1602751584552-8ba73aad10e1', { isPrimary: true })],
+        isActive: true,
+        createdBy: admin._id
+      },
+      // Brand logo strip — SliderLogo.jsx (bannerType=slider)
+      {
+        name: 'category-logo-slider',
+        title: 'As Seen In',
+        bannerType: 'slider',
+        page: 'category',
         position: 'middle',
-        displayOrder: 2,
+        displayOrder: 1,
+        images: [
+          img('photo-1515562141207-7a88fb7ce338', { displayOrder: 1, isPrimary: true }),
+          img('photo-1611652022419-a9419f74343d', { displayOrder: 2 }),
+          img('photo-1599643478518-a784e5dc4c8f', { displayOrder: 3 }),
+          img('photo-1573408301185-9146fe634ad0', { displayOrder: 4 }),
+          img('photo-1535632066927-ab7c9ab60908', { displayOrder: 5 })
+        ],
+        isActive: true,
+        createdBy: admin._id
+      },
+      // About page — About.jsx
+      {
+        name: 'about-top',
+        title: 'OUR STORY',
+        subheader: 'Three generations of craftsmanship',
+        bannerType: 'header',
+        page: 'about',
+        position: 'top',
+        displayOrder: 1,
+        images: [img('photo-1573408301185-9146fe634ad0', { isPrimary: true })],
+        isActive: true,
+        createdBy: admin._id
+      },
+      {
+        name: 'about-bottom',
+        title: 'VISIT OUR ATELIER',
+        subheader: 'Where every piece begins',
+        bannerType: 'footer',
+        page: 'about',
+        position: 'bottom',
+        displayOrder: 1,
+        images: [img('photo-1535632066927-ab7c9ab60908', { isPrimary: true })],
         isActive: true,
         createdBy: admin._id
       }
     ];
-    
+
     await Banner.insertMany(banners);
-    console.log('✅ Banners created');
+    console.log(`✅ Banners created (${banners.length} storefront slots)`);
     
     console.log('🎉 Database seeding completed successfully!');
     console.log('\n📊 Summary:');
-    console.log('- Admin user: admin@jewellery.com / Admin@123456');
-    console.log('- Sample customer: customer@example.com / Customer@123');
+    // Print the credentials actually used — ADMIN_PASSWORD in .env overrides
+    // the default, and printing the default instead is a trap.
+    console.log(`- Admin user: ${admin.email} / ${adminPassword}`);
+    console.log(`- Sample customer: ${customer.email} / ${customerPassword}`);
     console.log('- Categories: 8 created');
     console.log('- Subcategories: 3 created');
     console.log('- Products: 3 created');

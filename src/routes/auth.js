@@ -29,6 +29,10 @@ router.post('/resend-verification', resendVerification);
 router.post('/send-register-otp', require('../controllers/authController').sendRegisterOtp);
 router.post('/verify-otp', require('../controllers/authController').verifyOtp);
 
+// Must stay public: it is called precisely when the access token has expired,
+// so protect() would reject every request that actually needs it.
+router.post('/refresh-token', refreshToken);
+
 // Protected routes
 router.use(protect);
 router.post('/logout', logout);
@@ -37,6 +41,5 @@ router.patch('/update-me', updateMe);
 router.post('/update-me', updateMe);
 router.patch('/update-password', updatePassword);
 router.post('/update-password', updatePassword);
-router.post('/refresh-token', refreshToken);
 
 module.exports = router;

@@ -65,18 +65,30 @@ module.exports = (err, req, res, next) => {
   err.statusCode = err.statusCode || 500;
   err.status = err.status || 'error';
 
+  // Normalise known error shapes BEFORE branching on environment. Doing this
+  // only in production meant a bad form field returned 500 in development,
+  // so clients could not tell invalid input from a server fault.
+  let error = Object.assign(Object.create(Object.getPrototypeOf(err)), err);
+  error.message = err.message;
+  error.name = err.name;
+  error.statusCode = err.statusCode;
+  error.status = err.status;
+
+  if (err.name === 'CastError') error = handleCastErrorDB(err);
+  else if (err.code === 11000) error = handleDuplicateFieldsDB(err);
+  else if (err.name === 'ValidationError') error = handleValidationErrorDB(err);
+  else if (err.name === 'JsonWebTokenError') error = handleJWTError();
+  else if (err.name === 'TokenExpiredError') error = handleJWTExpiredError();
+
   if (process.env.NODE_ENV === 'development') {
-    sendErrorDev(err, res);
+    // Same status code as production; the stack is the only extra.
+    res.status(error.statusCode || 500).json({
+      status: error.status || 'error',
+      error: { statusCode: error.statusCode, status: error.status, isOperational: error.isOperational },
+      message: error.message,
+      stack: err.stack
+    });
   } else {
-    let error = { ...err };
-    error.message = err.message;
-
-    if (err.name === 'CastError') error = handleCastErrorDB(error);
-    if (err.code === 11000) error = handleDuplicateFieldsDB(error);
-    if (err.name === 'ValidationError') error = handleValidationErrorDB(error);
-    if (err.name === 'JsonWebTokenError') error = handleJWTError();
-    if (err.name === 'TokenExpiredError') error = handleJWTExpiredError();
-
     sendErrorProd(error, res);
   }
 };

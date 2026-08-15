@@ -118,9 +118,20 @@ const userSchema = new mongoose.Schema({
     },
     phone: {
       type: String,
-      required: [true, 'Phone number is required']
+      required: [true, 'Phone number is required'],
+      // Same 10-digit rule as the account-level phone field above
+      validate: {
+        validator: (v) => /^[0-9]{10}$/.test(String(v || '').replace(/\D/g, '')),
+        message: 'Phone number must be 10 digits'
+      }
     },
-    alternatePhone: String,
+    alternatePhone: {
+      type: String,
+      validate: {
+        validator: (v) => !v || /^[0-9]{10}$/.test(String(v).replace(/\D/g, '')),
+        message: 'Alternate phone number must be 10 digits'
+      }
+    },
     isDefault: {
       type: Boolean,
       default: false

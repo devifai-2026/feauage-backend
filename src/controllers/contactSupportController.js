@@ -15,33 +15,37 @@ exports.createContactSupport = catchAsync(async (req, res, next) => {
     return next(new AppError('Please provide name, email, and message', 400));
   }
 
+  // Persist FIRST. Notification is best-effort: previously the message was
+  // only saved if the email went out, so with the mail provider unconfigured
+  // (or briefly down) every customer enquiry was silently discarded and the
+  // customer was shown an error.
+  const contactSupport = await ContactSupport.create({
+    fullName: name,
+    email,
+    message,
+    isEmailSend: false
+  });
+
   try {
-    // Step 1: Send email first
     await brevoService.sendContactFormEmail(
       { name, email, message },
       process.env.BREVO_SENDER_EMAIL
     );
-
-    // Step 2: If email is successful, save to database
-    const contactSupport = await ContactSupport.create({
-      fullName : name,
-      email,
-      message,
-      isEmailSend: true
-    });
-
-    res.status(201).json({
-      status: 'success',
-      message: 'Thank you for contacting us! Your message has been received and an email confirmation has been sent.',
-      data: {
-        contactSupport
-      }
-    });
+    contactSupport.isEmailSend = true;
+    await contactSupport.save();
   } catch (error) {
-    // If email sending fails, don't save to database
-    console.error('Contact form error:', error);
-    return next(new AppError('Failed to process your request. Please try again later.', 500));
+    // The enquiry is safely stored and visible in the admin panel; the admin
+    // can follow up manually. Do not fail the customer's request for this.
+    console.error('Contact form notification failed (enquiry still saved):', error.message);
   }
+
+  res.status(201).json({
+    status: 'success',
+    message: 'Thank you for contacting us! Your message has been received.',
+    data: {
+      contactSupport
+    }
+  });
 });
 
 // @desc    Get all contact support submissions with pagination & filters
@@ -89,6 +93,30 @@ exports.getAllContactSupport = catchAsync(async (req, res, next) => {
     results: contactSupports.length,
     data: {
       tickets: contactSupports
+    }
+  });
+});
+
+// @desc    Get a single contact support submission
+// @route   GET /api/v1/contact/getContactSupport/:id
+// @access  Private/Admin
+exports.getContactSupport = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  if (!id || !id.match(/^[0-9a-fA-F]{24}$/)) {
+    return next(new AppError('Invalid ticket id', 400));
+  }
+
+  const ticket = await ContactSupport.findById(id);
+
+  if (!ticket) {
+    return next(new AppError('Contact support ticket not found', 404));
+  }
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      ticket
     }
   });
 });
