@@ -191,8 +191,11 @@ app.get('/api/v1/health', (req, res) => {
   });
 });
 
-// Shiprocket health check endpoint (admin use)
-app.get('/api/v1/health/shiprocket', async (req, res) => {
+// Shiprocket health check endpoint — admin only. This was public and returned
+// the configured Shiprocket account email to anyone who asked.
+const { protect: requireAuth, restrictTo: requireRole } = require('./middleware/auth');
+
+app.get('/api/v1/health/shiprocket', requireAuth, requireRole('admin', 'superadmin'), async (req, res) => {
   const svc = new ShippingService();
   const ok = await svc.testConnection();
   res.status(ok ? 200 : 503).json({
@@ -203,8 +206,16 @@ app.get('/api/v1/health/shiprocket', async (req, res) => {
   });
 });
 
-// Route to list all endpoints
+// Route to list all endpoints — development only. In production this handed
+// anyone a complete map of the API, every admin route included.
 app.get('/api/v1/endpoints', (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({
+      status: 'fail',
+      message: `Can't find ${req.originalUrl} on this server!`
+    });
+  }
+
   const baseUrl = `${req.protocol}://${req.get('host')}`;
   const endpoints = [];
 
