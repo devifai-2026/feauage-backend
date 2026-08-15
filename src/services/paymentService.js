@@ -1,11 +1,8 @@
-const Razorpay = require('razorpay');
 const crypto = require('crypto');
 
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET
-});
+// Share the single guarded client. Constructing Razorpay here as well threw at
+// require() time whenever the keys were unset, crashing the server on boot.
+const razorpay = require('../configs/razorpay');
 
 class PaymentService {
   // Create Razorpay order
