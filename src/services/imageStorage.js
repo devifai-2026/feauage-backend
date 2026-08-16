@@ -52,13 +52,29 @@ async function uploadToImgbb(file, folder = 'general') {
   form.append('image', file.buffer.toString('base64'));
   form.append('name', `${safeFolder}-${Date.now()}-${safeName}`);
 
-  const { data } = await axios.post(IMGBB_ENDPOINT, form, {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    // Base64 inflates by ~33%; allow headroom for the 10MB upload limit
-    maxBodyLength: 40 * 1024 * 1024,
-    maxContentLength: 40 * 1024 * 1024,
-    timeout: 60_000
-  });
+  let data;
+  try {
+    ({ data } = await axios.post(IMGBB_ENDPOINT, form, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      // Base64 inflates by ~33%; allow headroom for the 10MB upload limit
+      maxBodyLength: 40 * 1024 * 1024,
+      maxContentLength: 40 * 1024 * 1024,
+      timeout: 60_000
+    }));
+  } catch (err) {
+    // axios reports only "status code 400"; ImgBB puts the real reason in the
+    // response body, so surface that or the caller is left guessing.
+    const body = err.response?.data;
+    const detail =
+      body?.error?.message ||
+      body?.status_txt ||
+      (typeof body === 'string' ? body.slice(0, 200) : null);
+    throw new Error(
+      detail
+        ? `ImgBB rejected the upload: ${detail}`
+        : `ImgBB request failed (${err.response?.status || err.code || 'no response'})`
+    );
+  }
 
   if (!data || !data.success || !data.data) {
     throw new Error(data?.error?.message || 'ImgBB rejected the upload');
