@@ -33,16 +33,28 @@ const s3 = new S3Client({
 // unreadable stack trace, making the panel look broken.
 const useImgbb = () => Boolean((process.env.IMGBB_API_KEY || '').trim());
 
+const useCloudinary = () =>
+  Boolean(
+    (process.env.CLOUDINARY_URL || '').trim() ||
+      ((process.env.CLOUDINARY_CLOUD_NAME || '').trim() &&
+        (process.env.CLOUDINARY_API_KEY || '').trim() &&
+        (process.env.CLOUDINARY_API_SECRET || '').trim())
+  );
+
+// Anything that is not S3 needs the bytes in memory so the service can forward
+// them; only multer-s3 streams straight to its destination.
+const useMemoryStorage = () => useCloudinary() || useImgbb();
+
 const isStorageConfigured = () =>
-  useImgbb() || (Boolean(process.env.AWS_S3_BUCKET_NAME) && hasExplicitCreds);
+  useCloudinary() || useImgbb() || (Boolean(process.env.AWS_S3_BUCKET_NAME) && hasExplicitCreds);
 
 const requireStorageConfigured = (req, res, next) => {
   if (!isStorageConfigured()) {
     return next(
       new AppError(
-        'Image uploads are not configured on this server. Set IMGBB_API_KEY ' +
-          '(simplest), or AWS_S3_BUCKET_NAME + AWS_ACCESS_KEY_ID + ' +
-          'AWS_SECRET_ACCESS_KEY, in the backend .env, then restart.',
+        'Image uploads are not configured on this server. Set CLOUDINARY_URL ' +
+          '(recommended), or IMGBB_API_KEY, or AWS_S3_BUCKET_NAME + ' +
+          'AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY, then restart.',
         503
       )
     );
@@ -89,7 +101,7 @@ const fileFilter = (req, file, cb) => {
 // With ImgBB we need the bytes in hand to POST them on, so keep the file in
 // memory rather than streaming it to a bucket.
 const createStorage = (folder) =>
-  useImgbb()
+  useMemoryStorage()
     ? multer.memoryStorage()
     : multerS3({
     s3,
@@ -169,7 +181,7 @@ module.exports = {
 
   // Generic via ?folder=xyz
   uploadGenericSingle: multer({
-    storage: useImgbb() ? multer.memoryStorage() : multerS3({
+    storage: useMemoryStorage() ? multer.memoryStorage() : multerS3({
       s3,
       bucket: process.env.AWS_S3_BUCKET_NAME || 'unconfigured-bucket',
       contentType: multerS3.AUTO_CONTENT_TYPE,
@@ -194,7 +206,7 @@ module.exports = {
   }).single('image'),
 
   uploadGenericMultiple: multer({
-    storage: useImgbb() ? multer.memoryStorage() : multerS3({
+    storage: useMemoryStorage() ? multer.memoryStorage() : multerS3({
       s3,
       bucket: process.env.AWS_S3_BUCKET_NAME || 'unconfigured-bucket',
       contentType: multerS3.AUTO_CONTENT_TYPE,

@@ -1,12 +1,18 @@
 const axios = require('axios');
+const cloudinary = require('cloudinary').v2;
 
 /**
  * Image storage, provider-agnostic.
  *
- * ImgBB is used when IMGBB_API_KEY is set; it needs no bucket, no IAM user and
- * no per-request signing, so uploads work with a single environment variable.
- * S3 remains supported for when AWS is configured — see middleware/upload.js,
- * which streams straight to the bucket in that case and never reaches here.
+ * Provider precedence: Cloudinary, then ImgBB, then S3.
+ *
+ * Cloudinary is the default for deployed environments — ImgBB blocks datacenter
+ * IP ranges ("You have been forbidden to use this website"), so server-side
+ * uploads from Render fail there regardless of the key. ImgBB is kept because
+ * it works fine from a developer machine and needs only one variable.
+ *
+ * S3 never reaches this module: middleware/upload.js streams straight to the
+ * bucket when AWS is configured.
  *
  * Every provider returns the same shape so callers (and the admin panel) do not
  * care which one is active:
@@ -26,12 +32,91 @@ const isS3Configured = () =>
       process.env.AWS_SECRET_ACCESS_KEY
   );
 
+// Cloudinary accepts either CLOUDINARY_URL (cloudinary://key:secret@cloud) or
+// the three discrete variables.
+const isCloudinaryConfigured = () =>
+  Boolean(
+    (process.env.CLOUDINARY_URL || '').trim() ||
+      ((process.env.CLOUDINARY_CLOUD_NAME || '').trim() &&
+        (process.env.CLOUDINARY_API_KEY || '').trim() &&
+        (process.env.CLOUDINARY_API_SECRET || '').trim())
+  );
+
+let cloudinaryReady = false;
+const configureCloudinary = () => {
+  if (cloudinaryReady) return;
+  // The SDK reads CLOUDINARY_URL from the environment on its own; only pass
+  // explicit values when the discrete variables are the ones that are set.
+  if (!(process.env.CLOUDINARY_URL || '').trim()) {
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET
+    });
+  }
+  cloudinary.config({ secure: true });
+  cloudinaryReady = true;
+};
+
 /** Which provider will handle an upload right now. */
 const activeProvider = () => {
+  if (isCloudinaryConfigured()) return 'cloudinary';
   if (isImgbbConfigured()) return 'imgbb';
   if (isS3Configured()) return 's3';
   return null;
 };
+
+/**
+ * Send one in-memory file to Cloudinary.
+ * @param {{buffer: Buffer, originalname: string, mimetype: string, size: number}} file
+ */
+async function uploadToCloudinary(file, folder = 'general') {
+  configureCloudinary();
+
+  const safeFolder = String(folder).replace(/[^a-zA-Z0-9-_/]/g, '') || 'general';
+
+  // Deliberately uploader.upload(), not uploader.upload_stream().
+  //
+  // upload_stream hands back the stream and keeps its internal Q deferred to
+  // itself (see cloudinary/lib/api_client/execute_request.js — it rejects the
+  // deferred AND calls the callback, then returns deferred.promise to a caller
+  // that never receives it). With the callback style that rejection has no
+  // handler, and server.js exits the process on unhandledRejection — so a
+  // single corrupt image took the whole API down.
+  //
+  // upload() returns that same promise, so awaiting it handles the rejection.
+  const dataUri = `data:${file.mimetype || 'image/png'};base64,${file.buffer.toString('base64')}`;
+
+  let result;
+  try {
+    result = await cloudinary.uploader.upload(dataUri, {
+      folder: `feauag/${safeFolder}`,
+      resource_type: 'image',
+      // Let Cloudinary pick the best format/quality for each viewer
+      transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+    });
+  } catch (err) {
+    // The SDK rejects with a plain object, not an Error
+    const message =
+      err?.message ||
+      err?.error?.message ||
+      (typeof err === 'string' ? err : 'Cloudinary rejected the upload');
+    throw new Error(String(message));
+  }
+
+  if (!result?.secure_url) {
+    throw new Error('Cloudinary returned no URL');
+  }
+
+  return {
+    url: result.secure_url,
+    key: result.public_id,
+    size: result.bytes || file.size,
+    contentType: result.format ? `image/${result.format}` : file.mimetype,
+    width: result.width,
+    height: result.height
+  };
+}
 
 /**
  * Send one in-memory file to ImgBB.
@@ -97,6 +182,10 @@ async function uploadToImgbb(file, folder = 'general') {
 async function storeImage(file, folder) {
   const provider = activeProvider();
 
+  if (provider === 'cloudinary') {
+    return uploadToCloudinary(file, folder);
+  }
+
   if (provider === 'imgbb') {
     return uploadToImgbb(file, folder);
   }
@@ -123,6 +212,7 @@ module.exports = {
   storeImage,
   storeImages,
   activeProvider,
+  isCloudinaryConfigured,
   isImgbbConfigured,
   isS3Configured
 };
