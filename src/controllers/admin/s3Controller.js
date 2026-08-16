@@ -1,8 +1,15 @@
-// controllers/s3Controller.js
+// controllers/admin/s3Controller.js
+// Upload endpoints. The storage provider (ImgBB or S3) is chosen by
+// services/imageStorage based on which environment variables are set; the
+// response shape is identical either way so the admin panel is unaffected.
 const catchAsync = require('../../utils/catchAsync');
 const AppError = require('../../utils/appError');
+const { storeImage, storeImages, activeProvider } = require('../../services/imageStorage');
 
-// @desc    Upload single image to S3
+const folderFrom = (req) =>
+  String(req.query.folder || req.body.folder || 'general').replace(/[^a-zA-Z0-9-_]/g, '') || 'general';
+
+// @desc    Upload a single image
 // @route   POST /api/v1/admin/upload?folder=banners
 // @access  Private/Admin
 exports.uploadImage = catchAsync(async (req, res, next) => {
@@ -10,18 +17,16 @@ exports.uploadImage = catchAsync(async (req, res, next) => {
     return next(new AppError('Please upload an image file', 400));
   }
 
-  res.status(200).json({
-    status: 'success',
-    data: {
-      url: req.file.location,
-      key: req.file.key,
-      size: req.file.size,
-      contentType: req.file.contentType || req.file.mimetype
-    }
-  });
+  try {
+    const stored = await storeImage(req.file, folderFrom(req));
+    res.status(200).json({ status: 'success', data: stored });
+  } catch (err) {
+    console.error(`[upload] ${activeProvider() || 'no provider'} failed:`, err.message);
+    return next(new AppError(`Image upload failed: ${err.message}`, 502));
+  }
 });
 
-// @desc    Upload multiple images to S3
+// @desc    Upload multiple images
 // @route   POST /api/v1/admin/upload-multiple?folder=products
 // @access  Private/Admin
 exports.uploadImages = catchAsync(async (req, res, next) => {
@@ -29,18 +34,15 @@ exports.uploadImages = catchAsync(async (req, res, next) => {
     return next(new AppError('Please upload at least one image file', 400));
   }
 
-  const uploadedFiles = req.files.map(file => ({
-    url: file.location,
-    key: file.key,
-    size: file.size,
-    contentType: file.contentType || file.mimetype
-  }));
-
-  res.status(200).json({
-    status: 'success',
-    results: uploadedFiles.length,
-    data: {
-      files: uploadedFiles
-    }
-  });
+  try {
+    const files = await storeImages(req.files, folderFrom(req));
+    res.status(200).json({
+      status: 'success',
+      results: files.length,
+      data: { files }
+    });
+  } catch (err) {
+    console.error(`[upload] ${activeProvider() || 'no provider'} failed:`, err.message);
+    return next(new AppError(`Image upload failed: ${err.message}`, 502));
+  }
 });

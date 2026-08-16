@@ -27,18 +27,22 @@ const s3 = new S3Client({
     : {}),
 });
 
-// Uploads need a bucket AND credentials. Without them the AWS SDK throws a
-// low-level error (PermanentRedirect / CredentialsProviderError) that reaches
-// the admin as an unreadable stack trace, making the panel look broken.
+// ImgBB needs only an API key; S3 needs a bucket AND credentials. Either is
+// enough. Without one, the AWS SDK throws a low-level error
+// (PermanentRedirect / CredentialsProviderError) that reaches the admin as an
+// unreadable stack trace, making the panel look broken.
+const useImgbb = () => Boolean((process.env.IMGBB_API_KEY || '').trim());
+
 const isStorageConfigured = () =>
-  Boolean(process.env.AWS_S3_BUCKET_NAME) && hasExplicitCreds;
+  useImgbb() || (Boolean(process.env.AWS_S3_BUCKET_NAME) && hasExplicitCreds);
 
 const requireStorageConfigured = (req, res, next) => {
   if (!isStorageConfigured()) {
     return next(
       new AppError(
-        'Image uploads are not configured on this server. Set AWS_S3_BUCKET_NAME, ' +
-          'AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in the backend .env, then restart.',
+        'Image uploads are not configured on this server. Set IMGBB_API_KEY ' +
+          '(simplest), or AWS_S3_BUCKET_NAME + AWS_ACCESS_KEY_ID + ' +
+          'AWS_SECRET_ACCESS_KEY, in the backend .env, then restart.',
         503
       )
     );
@@ -52,15 +56,29 @@ const requireStorageConfigured = (req, res, next) => {
 
 const fileFilter = (req, file, cb) => {
   const filetypes = /jpeg|jpg|png|gif|webp/;
-  const extname = filetypes.test(
-    path.extname(file.originalname).toLowerCase()
-  );
+  const ext = path.extname(file.originalname).toLowerCase();
+  const extname = filetypes.test(ext);
   const mimetype = filetypes.test(file.mimetype);
 
-  if (mimetype && extname) {
+  // Some clients send application/octet-stream for formats their MIME table
+  // does not know (commonly .webp). Rejecting a valid photo on that basis is a
+  // poor experience, and the extension check plus the storage provider's own
+  // validation still apply, so accept an unknown type with a valid extension.
+  const unknownType =
+    !file.mimetype ||
+    file.mimetype === 'application/octet-stream' ||
+    file.mimetype === 'binary/octet-stream';
+
+  if (extname && (mimetype || unknownType)) {
     cb(null, true);
   } else {
-    cb(new AppError('Images only!', 400), false);
+    cb(
+      new AppError(
+        `Only image files are allowed (jpg, jpeg, png, gif, webp). Received "${file.originalname}" as ${file.mimetype || 'unknown type'}.`,
+        400
+      ),
+      false
+    );
   }
 };
 
@@ -68,8 +86,12 @@ const fileFilter = (req, file, cb) => {
 // COMMON STORAGE FACTORY
 // =============================
 
+// With ImgBB we need the bytes in hand to POST them on, so keep the file in
+// memory rather than streaming it to a bucket.
 const createStorage = (folder) =>
-  multerS3({
+  useImgbb()
+    ? multer.memoryStorage()
+    : multerS3({
     s3,
     // multer-s3 throws "bucket is required" at module-load time when this is
     // undefined, which takes the whole server down on boot. Fall back to a
@@ -147,7 +169,7 @@ module.exports = {
 
   // Generic via ?folder=xyz
   uploadGenericSingle: multer({
-    storage: multerS3({
+    storage: useImgbb() ? multer.memoryStorage() : multerS3({
       s3,
       bucket: process.env.AWS_S3_BUCKET_NAME || 'unconfigured-bucket',
       contentType: multerS3.AUTO_CONTENT_TYPE,
@@ -172,7 +194,7 @@ module.exports = {
   }).single('image'),
 
   uploadGenericMultiple: multer({
-    storage: multerS3({
+    storage: useImgbb() ? multer.memoryStorage() : multerS3({
       s3,
       bucket: process.env.AWS_S3_BUCKET_NAME || 'unconfigured-bucket',
       contentType: multerS3.AUTO_CONTENT_TYPE,

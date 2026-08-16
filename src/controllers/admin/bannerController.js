@@ -2,6 +2,7 @@ const Banner = require('../../models/Banner');
 const PromoCode = require('../../models/PromoCode');
 const AdminActivity = require('../../models/AdminActivity');
 const catchAsync = require('../../utils/catchAsync');
+const { storeImage } = require('../../services/imageStorage');
 const AppError = require('../../utils/appError');
 const APIFeatures = require('../../utils/apiFeatures');
 
@@ -217,9 +218,13 @@ exports.uploadBannerImage = catchAsync(async (req, res, next) => {
     return next(new AppError('Banner not found', 404));
   }
 
+  // Resolve through the configured provider (ImgBB or S3) — file.location
+  // only exists when multer-s3 handled the write.
+  const stored = await storeImage(req.file, 'banners');
+
   // Create new image object
   const newImage = {
-    url: req.file.location, // S3 URL
+    url: stored.url,
     alt: req.body.alt || banner.name,
     isPrimary: req.body.isPrimary === 'true' || banner.images.length === 0,
     displayOrder: parseInt(req.body.displayOrder) || banner.images.length

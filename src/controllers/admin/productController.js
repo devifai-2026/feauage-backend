@@ -8,6 +8,7 @@ const AdminActivity = require('../../models/AdminActivity');
 const Order = require('../../models/Order');
 const OrderItem = require('../../models/OrderItem');
 const catchAsync = require('../../utils/catchAsync');
+const { storeImages } = require('../../services/imageStorage');
 const AppError = require('../../utils/appError');
 const APIFeatures = require('../../utils/apiFeatures');
 
@@ -452,13 +453,18 @@ exports.uploadProductImages = catchAsync(async (req, res, next) => {
 
   const images = [];
 
-  for (const file of req.files) {
+  // storeImage resolves the URL from whichever provider is configured
+  // (ImgBB or S3); file.location only exists on the S3 path.
+  const stored = await storeImages(req.files, 'products');
+
+  for (let i = 0; i < req.files.length; i += 1) {
+    const file = req.files[i];
     const image = await ProductImage.create({
       product: product._id,
-      url: file.location, // S3 URL
+      url: stored[i].url,
       altText: `Image of ${product.name}`,
-      size: file.size,
-      mimeType: file.mimetype,
+      size: stored[i].size || file.size,
+      mimeType: stored[i].contentType || file.mimetype,
       uploadedBy: req.user.id
     });
 
