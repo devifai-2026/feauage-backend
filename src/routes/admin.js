@@ -124,6 +124,8 @@ const {
 const {
   getAllReviews,
   updateReviewStatus,
+  editReview,
+  createAdminReview,
   deleteReview: deleteAdminReview,
 } = require("../controllers/admin/reviewController");
 
@@ -329,9 +331,10 @@ router.post("/upload", requireStorageConfigured, uploadGenericSingle, uploadImag
 router.post("/upload-multiple", requireStorageConfigured, uploadGenericMultiple, uploadImages);
 
 // Review management
-// Review management
 router.get("/reviews", getAllReviews);
+router.post("/reviews", createAdminReview);
 router.patch("/reviews/:id/status", updateReviewStatus);
+router.patch("/reviews/:id", editReview);
 router.delete("/reviews/:id", deleteAdminReview);
 
 // Promo code routes

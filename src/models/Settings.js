@@ -31,6 +31,22 @@ const settingsSchema = new mongoose.Schema({
     type: [String],
     default: ['400001', '110001', '600001', '700001', '500001', '560001']
   },
+  // Product-page tabs. Admin can hide a tab or rename its label; DESCRIPTION
+  // is always kept visible so the page can never render with no tabs at all.
+  productTabs: {
+    description: {
+      enabled: { type: Boolean, default: true },
+      label: { type: String, default: 'DESCRIPTION', trim: true, maxlength: 30 }
+    },
+    details: {
+      enabled: { type: Boolean, default: true },
+      label: { type: String, default: 'DETAILS', trim: true, maxlength: 30 }
+    },
+    reviews: {
+      enabled: { type: Boolean, default: true },
+      label: { type: String, default: 'REVIEWS', trim: true, maxlength: 30 }
+    }
+  },
   updatedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'

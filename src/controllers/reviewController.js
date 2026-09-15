@@ -57,7 +57,11 @@ exports.createReview = catchAsync(async (req, res, next) => {
     comment,
     images: images || [],
     isVerifiedPurchase,
-    isApproved: true // Auto-approved for development
+    // Shopper reviews wait for admin approval. This previously defaulted to
+    // true ("auto-approved for development"), which published every
+    // submission to the storefront the instant it was posted.
+    status: 'pending',
+    isApproved: false
   });
 
   res.status(201).json({
@@ -74,8 +78,11 @@ exports.createReview = catchAsync(async (req, res, next) => {
 exports.getProductReviews = catchAsync(async (req, res, next) => {
   const { page = 1, limit = 10, rating, sort = 'newest' } = req.query;
 
+  // Only approved reviews are public. Without this, pending and rejected
+  // submissions were visible to shoppers the moment they were posted.
   const query = {
-    product: req.params.productId
+    product: req.params.productId,
+    status: 'approved'
   };
 
   // Filter by rating if provided
@@ -107,7 +114,8 @@ exports.getProductReviews = catchAsync(async (req, res, next) => {
       .sort(sortOption)
       .skip(skip)
       .limit(limit)
-      .populate('user', 'firstName lastName profileImage'),
+      .populate('user', 'firstName lastName profileImage')
+      .populate('createdByAdmin', 'firstName lastName'),
     Review.countDocuments(query)
   ]);
 
@@ -115,7 +123,8 @@ exports.getProductReviews = catchAsync(async (req, res, next) => {
   const ratingDistribution = await Review.aggregate([
     {
       $match: {
-        product: new mongoose.Types.ObjectId(req.params.productId)
+        product: new mongoose.Types.ObjectId(req.params.productId),
+        status: 'approved'
       }
     },
     {
@@ -131,7 +140,8 @@ exports.getProductReviews = catchAsync(async (req, res, next) => {
   const avgRating = await Review.aggregate([
     {
       $match: {
-        product: new mongoose.Types.ObjectId(req.params.productId)
+        product: new mongoose.Types.ObjectId(req.params.productId),
+        status: 'approved'
       }
     },
     {
@@ -170,8 +180,8 @@ exports.updateReview = catchAsync(async (req, res, next) => {
     return next(new AppError('Review not found', 404));
   }
 
-  // Check if review belongs to user
-  if (review.user.toString() !== req.user.id) {
+  // Admin-authored reviews have user: null — guard before calling toString().
+  if (!review.user || review.user.toString() !== req.user.id) {
     return next(new AppError('Not authorized to update this review', 403));
   }
 
@@ -185,6 +195,15 @@ exports.updateReview = catchAsync(async (req, res, next) => {
     }
   });
 
+  // Editing content re-opens moderation: otherwise an approved review could be
+  // rewritten into anything and stay live without a second look.
+  const contentChanged = ['rating', 'title', 'comment', 'images']
+    .some(f => updates[f] !== undefined);
+  if (contentChanged) {
+    updates.status = 'pending';
+    updates.isApproved = false;
+  }
+
   // Update review
   const updatedReview = await Review.findByIdAndUpdate(
     req.params.id,
@@ -194,6 +213,8 @@ exports.updateReview = catchAsync(async (req, res, next) => {
       runValidators: true
     }
   );
+
+  await Review.updateProductRatings(review.product);
 
   res.status(200).json({
     status: 'success',
@@ -289,7 +310,7 @@ exports.getUserReviews = catchAsync(async (req, res, next) => {
   const features = new APIFeatures(
     Review.find({
       user: req.params.userId,
-      isApproved: true
+      status: 'approved'
     }),
     req.query
   )
@@ -304,7 +325,7 @@ exports.getUserReviews = catchAsync(async (req, res, next) => {
 
   const total = await Review.countDocuments({
     user: req.params.userId,
-    isApproved: true,
+    status: 'approved',
     ...features.filterQuery
   });
 

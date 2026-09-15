@@ -25,7 +25,8 @@ exports.updateSettings = catchAsync(async (req, res, next) => {
     'freeShippingThreshold',
     'metroShippingCharge',
     'standardShippingCharge',
-    'metroPincodes'
+    'metroPincodes',
+    'productTabs'
   ];
 
   const updates = {};
@@ -34,6 +35,12 @@ exports.updateSettings = catchAsync(async (req, res, next) => {
       updates[field] = req.body[field];
     }
   });
+
+  // The storefront needs at least one tab; description is the guaranteed one,
+  // so ignore any attempt to disable it rather than rendering an empty panel.
+  if (updates.productTabs?.description) {
+    updates.productTabs.description.enabled = true;
+  }
 
   updates.updatedBy = req.user.id;
 
