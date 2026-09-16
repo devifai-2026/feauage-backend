@@ -7,16 +7,39 @@ let io;
 const adminSockets = new Map(); // Map to store admin socket connections
 
 exports.initializeSocket = (server) => {
+  // Mirrors the HTTP CORS rule in src/app.js. CORS_ORIGINS (comma-separated) is
+  // the deployment-facing setting and must include the admin panel as well as
+  // the storefront — order notifications are pushed to both. When it is unset
+  // every origin is reflected, which keeps local development working.
+  const configuredOrigins = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+
+  const allowedOrigins = [
+    ...configuredOrigins,
+    process.env.CLIENT_URL,
+    process.env.ADMIN_URL,
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:5175'
+  ]
+    .filter(Boolean)
+    .map((o) => o.replace(/\/+$/, ''));
+
   io = socketIO(server, {
     cors: {
-      origin: [
-        process.env.CLIENT_URL,
-        'http://localhost:3000',
-        'http://localhost:3001',
-        'http://localhost:5173',
-        'http://localhost:5174',
-        'http://localhost:5175'
-      ].filter(Boolean),
+      // A function rather than a list: without CORS_ORIGINS set, a deployed
+      // admin panel on a domain nobody listed would be refused with no
+      // Access-Control-Allow-Origin header at all, which surfaces in the
+      // browser as an opaque CORS failure on the polling handshake.
+      origin: (origin, cb) => {
+        if (!origin) return cb(null, true);
+        if (!configuredOrigins.length) return cb(null, true);
+        cb(null, allowedOrigins.includes(origin.replace(/\/+$/, '')));
+      },
       methods: ['GET', 'POST'],
       credentials: true
     }
