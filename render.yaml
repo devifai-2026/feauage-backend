@@ -1,0 +1,108 @@
+# Render blueprint.
+#
+# This API needs a long-lived process, not a serverless function: Socket.io
+# holds open connections (src/sockets/orderSocket.js) and the cron jobs need a
+# scheduler that survives between requests. Both are lost on a per-request
+# runtime, so the service type is `web` on a persistent instance.
+#
+# Secrets are NOT listed here. Set them in the Render dashboard (or mark them
+# sync:false as below) so they never land in the repo.
+services:
+  - type: web
+    name: feauage-backend
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: npm ci
+    startCommand: npm start
+    # Render probes this to decide whether a deploy is healthy. It answers
+    # without touching Mongo, so it stays up even if the database is
+    # unreachable — check /api/v1/categories for a real end-to-end signal.
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render injects PORT itself; src/server.js already reads process.env.PORT.
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 30d
+      # Comma-separated origins allowed to call the API. When this is unset the
+      # CORS middleware in src/app.js reflects every origin, which is too open
+      # for a deployed environment.
+      - key: CORS_ORIGINS
+        value: https://feaug-ecomm-client.vercel.app,https://feaug-admin.vercel.app
+      - key: CLIENT_URL
+        value: https://feaug-ecomm-client.vercel.app
+      - key: FRONTEND_URL
+        value: https://feaug-ecomm-client.vercel.app
+      - key: SERVER_URL
+        value: https://feauage-backend.onrender.com
+      - key: WEBSITE_URL
+        value: https://feaug-ecomm-client.vercel.app
+      # Image storage. Cloudinary takes precedence in src/services/imageStorage.js.
+      - key: CLOUDINARY_URL
+        sync: false
+      - key: IMGBB_API_KEY
+        sync: false
+      # Payments
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: RAZORPAY_CALLBACK_URL
+        value: https://feauage-backend.onrender.com/api/v1/payments/callback
+      # Shipping
+      - key: SHIPROCKET_EMAIL
+        sync: false
+      - key: SHIPROCKET_PASSWORD
+        sync: false
+      - key: SHIPROCKET_BASE_URL
+        sync: false
+      - key: SHIPROCKET_WEBHOOK_SECRET
+        sync: false
+      - key: SHIPROCKET_PICKUP_LOCATION
+        sync: false
+      - key: SHIPROCKET_PICKUP_PINCODE
+        sync: false
+      # Mail
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        sync: false
+      - key: BREVO_SENDER_NAME
+        sync: false
+      - key: BREVO_CONTACT_EMAIL
+        sync: false
+      # AWS (optional — unset means Cloudinary handles uploads)
+      - key: AWS_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_S3_BUCKET_NAME
+        sync: false
+      - key: AWS_SES_SENDER_EMAIL
+        sync: false
