@@ -15,6 +15,43 @@ const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
  * @param {Object} emailData - Email configuration object
  * @returns {Promise} Response from Brevo API
  */
+/**
+ * Brevo intermittently rejects otherwise-valid requests with a 401 naming an
+ * "unrecognised IP address" — observed at roughly 8% of calls even with IP
+ * blocking deactivated. A single attempt therefore fails often enough to
+ * surface as a user-facing error, so transient failures are retried.
+ *
+ * Only retries 401/403 (the IP flake) and 5xx. Genuine client errors such as
+ * a malformed payload fail fast.
+ */
+const RETRYABLE = new Set([401, 403, 429, 500, 502, 503, 504]);
+
+const fetchWithRetry = async (url, options, attempts = 3) => {
+  let lastResponse = null;
+  let lastBody = null;
+
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) return { response, body: await response.json().catch(() => ({})) };
+
+      lastResponse = response;
+      lastBody = await response.json().catch(() => ({}));
+
+      if (!RETRYABLE.has(response.status)) break;
+    } catch (err) {
+      lastBody = { message: err.message };
+    }
+
+    // Brief backoff: 300ms, then 900ms.
+    if (i < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 300 * 3 ** i));
+    }
+  }
+
+  return { response: lastResponse, body: lastBody };
+};
+
 const sendEmail = async (emailData) => {
   try {
     console.log('Sending email with data:', {
@@ -23,7 +60,7 @@ const sendEmail = async (emailData) => {
       subject: emailData.subject,
     });
 
-    const response = await fetch(BREVO_API_URL, {
+    const { response, body: data } = await fetchWithRetry(BREVO_API_URL, {
       method: 'POST',
       headers: {
         'accept': 'application/json',
@@ -33,9 +70,7 @@ const sendEmail = async (emailData) => {
       body: JSON.stringify(emailData)
     });
 
-    const data = await response.json();
-
-    if (response.ok) {
+    if (response && response.ok) {
       console.log('Email sent successfully:', data);
       return { success: true, data };
     } else {
@@ -167,7 +202,7 @@ const addContact = async (email) => {
       ? [Number(process.env.BREVO_LIST_ID)]
       : undefined;
 
-    const response = await fetch('https://api.brevo.com/v3/contacts', {
+    const { response, body } = await fetchWithRetry('https://api.brevo.com/v3/contacts', {
       method: 'POST',
       headers: {
         'api-key': BREVO_API_KEY,
@@ -181,13 +216,15 @@ const addContact = async (email) => {
       })
     });
 
-    if (response.ok || response.status === 204) return { ok: true };
+    if (response && (response.ok || response.status === 204)) return { ok: true };
 
-    const body = await response.json().catch(() => ({}));
     // "Contact already exist" is a success from our point of view.
     if (body?.code === 'duplicate_parameter') return { ok: true };
 
-    return { ok: false, error: body?.message || `Brevo returned ${response.status}` };
+    return {
+      ok: false,
+      error: body?.message || `Brevo returned ${response ? response.status : 'no response'}`
+    };
   } catch (err) {
     return { ok: false, error: err.message };
   }
