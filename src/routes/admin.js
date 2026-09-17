@@ -345,6 +345,10 @@ router.delete("/promo-codes/:id", deletePromoCode);
 router.get("/public/promo-codes", getActivePromoCodes); // Public exposed via admin router but actually used by client if needed, or I'll move it.
 
 // Settings routes
+const newsletterController = require("../controllers/newsletterController");
+router.get("/newsletter", newsletterController.getSubscribers);
+router.delete("/newsletter/:id", newsletterController.deleteSubscriber);
+
 router.get("/settings", getSettings);
 router.patch("/settings", updateSettings);
 

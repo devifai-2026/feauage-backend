@@ -150,4 +150,47 @@ const createEmailCampaign = async (campaignData) => {
   }
 };
 
-module.exports = { sendEmail, sendOtpEmail, sendContactFormEmail, createEmailCampaign };
+/**
+ * Add (or update) a contact in Brevo. Used for newsletter signups.
+ *
+ * Returns { ok, error } rather than throwing: the caller has already stored
+ * the subscriber locally, so a Brevo outage must not fail the request.
+ * BREVO_LIST_ID is optional — without it the contact is created unlisted.
+ */
+const addContact = async (email) => {
+  if (!BREVO_API_KEY) {
+    return { ok: false, error: 'BREVO_API_KEY not configured' };
+  }
+
+  try {
+    const listId = process.env.BREVO_LIST_ID
+      ? [Number(process.env.BREVO_LIST_ID)]
+      : undefined;
+
+    const response = await fetch('https://api.brevo.com/v3/contacts', {
+      method: 'POST',
+      headers: {
+        'api-key': BREVO_API_KEY,
+        'Content-Type': 'application/json',
+        accept: 'application/json'
+      },
+      body: JSON.stringify({
+        email,
+        listIds: listId,
+        updateEnabled: true
+      })
+    });
+
+    if (response.ok || response.status === 204) return { ok: true };
+
+    const body = await response.json().catch(() => ({}));
+    // "Contact already exist" is a success from our point of view.
+    if (body?.code === 'duplicate_parameter') return { ok: true };
+
+    return { ok: false, error: body?.message || `Brevo returned ${response.status}` };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+};
+
+module.exports = { sendEmail, sendOtpEmail, sendContactFormEmail, createEmailCampaign, addContact };

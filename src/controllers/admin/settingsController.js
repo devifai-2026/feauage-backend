@@ -26,7 +26,16 @@ exports.updateSettings = catchAsync(async (req, res, next) => {
     'metroShippingCharge',
     'standardShippingCharge',
     'metroPincodes',
-    'productTabs'
+    'productTabs',
+    'serviceHighlights',
+    'serviceHighlightsEnabled',
+    'faqs',
+    'faqTitle',
+    'faqsEnabled',
+    'aboutJourney',
+    'aboutCraftsmanship',
+    'aboutValues',
+    'aboutCta'
   ];
 
   const updates = {};

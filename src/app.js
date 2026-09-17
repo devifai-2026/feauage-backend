@@ -29,6 +29,7 @@ const promoRoutes = require('./routes/promo');
 const categoryRoutes = require('./routes/categories');
 const { getAllSubcategories } = require('./controllers/categoryController');
 const settingsController = require('./controllers/settingsController');
+const newsletterController = require('./controllers/newsletterController');
 const updateController = require('./controllers/updateController');
 const flashSaleController = require('./controllers/flashSaleController');
 const bestSellerController = require('./controllers/bestSellerController');
@@ -163,6 +164,7 @@ app.get('/api/v1/flash-sale', flashSaleController.getActiveFlashSale);
 app.get('/api/v1/best-sellers', bestSellerController.getBestSellerSection);
 app.get('/api/v1/featured', featuredController.getFeaturedSection);
 app.post('/api/v1/support-tickets', supportController.createTicket);
+app.post('/api/v1/newsletter/subscribe', newsletterController.subscribe);
 
 
 // Run Shiprocket connection test on startup

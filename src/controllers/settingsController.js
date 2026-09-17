@@ -16,7 +16,24 @@ exports.getPublicSettings = catchAsync(async (req, res, next) => {
         metroShippingCharge: settings.metroShippingCharge,
         standardShippingCharge: settings.standardShippingCharge,
         // Storefront reads these to decide which product-page tabs to render.
-        productTabs: settings.productTabs
+        productTabs: settings.productTabs,
+        // Homepage services strip + FAQ accordion, both admin-managed.
+        // Disabled items are filtered out here so the storefront can render
+        // whatever it receives without re-checking flags.
+        serviceHighlightsEnabled: settings.serviceHighlightsEnabled,
+        serviceHighlights: (settings.serviceHighlights || [])
+          .filter((s) => s.enabled)
+          .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+        faqsEnabled: settings.faqsEnabled,
+        faqTitle: settings.faqTitle,
+        faqs: (settings.faqs || [])
+          .filter((f) => f.enabled)
+          .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+        // About page "Our Journey" copy.
+        aboutJourney: settings.aboutJourney,
+        aboutCraftsmanship: settings.aboutCraftsmanship,
+        aboutValues: settings.aboutValues,
+        aboutCta: settings.aboutCta
       }
     }
   });
